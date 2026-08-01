@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.env
+venv/
+.venv/
+
+# Models & large files
+*.pt
+*.engine
+*.onnx
+*.mp4
+*.avi
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+.next/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.dockerignore

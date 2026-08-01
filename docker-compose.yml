@@ -1,0 +1,82 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: yolo_analytics_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yolo_deepstream_backend
+    restart: always
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./backend:/app
+      # Keep runtime artifacts on the host.  These mounts remain intact when
+      # the container is recreated and prevent TensorRT from rebuilding models.
+      - ./backend/models:/app/models
+      - ./backend/models_config/weights:/app/models_config/weights
+      - ./backend/data:/app/data
+      - ./backend/models_config/DeepStream-Yolo/nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so:/opt/visionmanager/libnvdsinfer_custom_impl_Yolo.so:ro
+      - ./backend/models_config/libperson_pose_parser.so:/opt/visionmanager/libperson_pose_parser.so:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DISPLAY=$DISPLAY
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISABLE_DEEPSTREAM_GST=0
+      - ENABLE_CPU_TRACKER_FALLBACK=0
+      - CPU_TRACKER_PERSON_ONLY=1
+      - POSE_MODEL_PATH=/app/models/yolov8x-pose.pt
+      - FMS_IP=192.168.5.105
+      - FMS_MQTT_PORT=1883
+      - FMS_ORIGIN_X=185.0
+      - FMS_ORIGIN_Y=194.5
+      - FMS_LAYOUT_DEPTH=18.0
+      - DEEPSTREAM_ONNX_FILE=/app/models/yolov8x-pose.onnx
+      - DEEPSTREAM_ENGINE_FILE=/app/models/yolov8x-pose_b2_gpu0_fp16.engine
+      - DEEPSTREAM_LABELS_FILE=/app/models_config/labels.txt
+      - DEEPSTREAM_BATCH_SIZE=2
+      # Project-local NvDCF config: GPU correlation tracker without the
+      # optional sample ReID engine that is not shipped in the container.
+      - DEEPSTREAM_TRACKER_CONFIG=/app/models_config/tracker_config.yml
+      - REID_ONNX_FILE=/app/models/reid_512.onnx
+      - CPU_TRACKER_MODEL_PATH=/app/models/yolov8x-pose.pt
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: yolo_mediamtx
+    restart: always
+    network_mode: host
+    volumes:
+      - ./services/mediamtx/mediamtx.yml:/mediamtx.yml
+
+  frontend:
+    image: node:20-alpine
+    container_name: yolo_frontend
+    restart: always
+    network_mode: host
+    working_dir: /app
+    volumes:
+      - ./web-dashboard:/app
+    command: sh -c "npm install && npm run dev"
+
+volumes:
+  postgres_data:
