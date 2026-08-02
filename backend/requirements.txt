@@ -1,0 +1,17 @@
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+requests>=2.31.0
+psycopg2-binary>=2.9.6
+numpy>=1.24.0,<2.0
+scipy>=1.10.0
+websockets>=11.0.0
+shapely>=2.0.0
+httpx>=0.24.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.2
+pypdf>=3.17.0
+langchain-text-splitters>=0.0.1
+paho-mqtt>=1.6.1
+pillow>=10.0.0
