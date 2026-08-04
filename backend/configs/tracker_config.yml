@@ -1,0 +1,71 @@
+%YAML:1.0
+####################################################################################################
+# DeepStream 7.0 NvDCF Low-Level Tracker Configuration with Re-ID Embedding Support
+####################################################################################################
+
+BaseConfig:
+  minDetectorConfidence: 0.20    # Minimum confidence to consider detection
+
+TargetManagement:
+  enableBboxUnClipping: 1
+  preserveStreamUpdateOrder: 0
+  maxTargetsPerStream: 150
+  minIouDiff4NewTarget: 0.40
+  minTrackerConfidence: 0.15
+  probationAge: 2
+  maxShadowTrackingAge: 45
+  earlyTerminationAge: 1
+
+TrajectoryManagement:
+  useUniqueID: 0
+  enableReAssoc: 1
+  minMatchingScore4Overall: 0.60
+  minTrackletMatchingScore: 0.30
+  minMatchingScore4ReidSimilarity: 0.20
+  matchingScoreWeight4TrackletSimilarity: 0.70
+  matchingScoreWeight4ReidSimilarity: 0.30
+  reidExtractionInterval: 1
+
+DataAssociator:
+  dataAssociatorType: 0
+  associationMatcherType: 1
+  checkClassMatch: 1
+  minMatchingScore4Overall: 0.10
+  minMatchingScore4SizeSimilarity: 0.30
+  minMatchingScore4Iou: 0.10
+  minMatchingScore4VisualSimilarity: 0.40
+  matchingScoreWeight4VisualSimilarity: 0.40
+  matchingScoreWeight4SizeSimilarity: 0.30
+  matchingScoreWeight4Iou: 0.30
+
+StateEstimator:
+  stateEstimatorType: 1
+  processNoiseVar4Loc: 6000.0
+  processNoiseVar4Size: 1500.0
+  processNoiseVar4Vel: 1200.0
+  measurementNoiseVar4Detector: 100.0
+  measurementNoiseVar4Tracker: 250.0
+
+VisualTracker:
+  visualTrackerType: 1 # 1: NvDCF Correlation Filter Tracker
+  useColorNames: 1
+  useHog: 1
+  featureImgSizeLevel: 3
+  filterLr: 0.08
+  filterChannelWeightsLr: 0.035
+  gaussianSigma: 0.60
+
+ReID:
+  reidType: 2 # 2: Re-ID based re-association
+  batchSize: 32
+  workspaceSize: 1024
+  reidFeatureSize: 512
+  reidHistorySize: 100
+  inferDims: [3, 256, 128]
+  networkMode: 1
+  inputOrder: 0
+  colorFormat: 0
+  offsets: [123.675, 116.28, 103.53]
+  netScaleFactor: 0.01735207
+  keepAspc: 1
+  addFeatureNormalization: 1
