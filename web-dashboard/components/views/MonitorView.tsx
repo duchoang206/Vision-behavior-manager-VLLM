@@ -364,13 +364,9 @@ function CameraStreamCard({
                 return;
               }
               const displayClass = isRobot ? 'robot' : (isRack ? 'rack' : rawClass);
-              let label = hasCustomLabel ? `🎯 ${track.label}` : `${displayClass} #${track.id}`;
-              if (hasCustomLabel && (track.fms_battery !== undefined || track.fms_status)) {
-                const batStr = track.fms_battery !== undefined ? `${track.fms_battery}%` : '';
-                const statStr = track.fms_status ? ` · ${track.fms_status}` : '';
-                const spdStr = (track.fms_speed !== undefined && track.fms_speed > 0.05) ? ` · ${track.fms_speed.toFixed(1)}m/s` : '';
-                label = `🎯 ${track.label} (${batStr}${statStr}${spdStr})`;
-              }
+              const label = isPerson ? `person #${track.id}`
+                : hasCustomLabel ? (isRobot ? track.label!.toLowerCase() : track.label!)
+                  : `${displayClass} #${track.id}`;
 
               // Dynamic Accent Colors (Cyan for verified registered targets, Rose for robots, Indigo for racks)
               const strokeColor = isFallen ? '#ef4444' : hasCustomLabel ? '#22d3ee' : (isRobot ? '#f43f5e' : isPerson ? '#22c55e' : '#6366f1');
@@ -392,7 +388,7 @@ function CameraStreamCard({
                 ctx.fillStyle = fillColor;
                 ctx.fill('evenodd');
                 ctx.stroke();
-              } else {
+              } else if (!isPerson) {
                 ctx.strokeRect(px, py, pw, ph);
               }
               ctx.shadowBlur = 0;
@@ -420,13 +416,14 @@ function CameraStreamCard({
               }
 
               ctx.fillStyle = fillColor;
-              if (!drawMask) ctx.fillRect(px, py, pw, ph);
+              if (!drawMask && !isPerson) ctx.fillRect(px, py, pw, ph);
 
               // Label Tag Badge
-              ctx.font = 'bold 12px "JetBrains Mono", "Space Grotesk", monospace';
+              ctx.font = `${isPerson ? '500 10px' : 'bold 12px'} "JetBrains Mono", "Space Grotesk", monospace`;
               const textMetrics = ctx.measureText(label);
-              const tagW = textMetrics.width + 12;
-              const tagH = 20;
+              const tagPadding = isPerson ? 4 : 6;
+              const tagW = textMetrics.width + tagPadding * 2;
+              const tagH = isPerson ? 14 : 20;
               const tagY = Math.max(0, py - tagH);
 
               ctx.fillStyle = hasCustomLabel ? 'rgba(6, 182, 212, 0.95)' : (isRobot ? 'rgba(244, 63, 94, 0.90)' : 'rgba(99, 102, 241, 0.90)');
@@ -435,7 +432,7 @@ function CameraStreamCard({
               ctx.fill();
 
               ctx.fillStyle = '#ffffff';
-              ctx.fillText(label, px + 6, tagY + 14);
+              ctx.fillText(label, px + tagPadding, tagY + (isPerson ? 10 : 14));
               ctx.restore();
             });
           }

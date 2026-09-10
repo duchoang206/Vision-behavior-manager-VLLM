@@ -13,7 +13,7 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 from core.identity_utils import identity_global_id, stable_numeric_id
 from core.rtsp_reader import RTSPLatestFrameReader
-from core.registered_target_mask import advance_mask, eligible_target, registered_target_mask_segmenter
+from core.registered_target_mask import eligible_target, registered_target_mask_segmenter
 
 
 def _normalize_bbox(bbox: Optional[List[float]]) -> Optional[List[float]]:
@@ -135,6 +135,7 @@ class TemplateIdentityCameraTracker:
         self.rtsp_url = rtsp_url
         self.metadata_callback = metadata_callback
         self.target_fps = target_fps or int(os.getenv("IDENTITY_TEMPLATE_TARGET_FPS", "24"))
+        self.mask_target_fps = max(1, int(os.getenv("REGISTERED_MASK_TARGET_FPS", "11")))
         self.init_min_score = float(os.getenv("IDENTITY_TEMPLATE_INIT_MIN_SCORE", "0.68"))
         self.min_match_score = float(os.getenv("IDENTITY_TEMPLATE_MIN_SCORE", "0.68"))
         self.verify_min_score = float(os.getenv("IDENTITY_TEMPLATE_VERIFY_MIN_SCORE", "0.65"))
@@ -151,6 +152,9 @@ class TemplateIdentityCameraTracker:
         self.thread: Optional[threading.Thread] = None
         self.processed_frames = 0
         self.measured_fps = 0.0
+        self.decoder_threads = 1
+        self.last_frame_age_ms = 0.0
+        self.last_processing_ms = 0.0
         self._fps_window_started_at = time.time()
         self._fps_window_frames = 0
 
@@ -662,7 +666,8 @@ class TemplateIdentityCameraTracker:
         return None
 
     def _loop(self):
-        reader = RTSPLatestFrameReader(self.rtsp_url, cam_id=f"identity-{self.cam_id}")
+        reader = RTSPLatestFrameReader(self.rtsp_url, cam_id=f"identity-{self.cam_id}",
+                                       decoder_threads=self.decoder_threads)
         try:
             self._process_frames(reader)
         finally:
@@ -674,13 +679,20 @@ class TemplateIdentityCameraTracker:
         frame_interval = 1.0 / max(1, self.target_fps)
         while self.running:
             t0 = time.time()
-            ret, frame = reader.get_latest_frame()
+            with self.lock, registered_target_mask_segmenter.frame_slot():
+                target_fps = min(self.target_fps, self.mask_target_fps) if any(
+                    eligible_target(target) for target in self.targets.values()
+                ) else self.target_fps
+                frame_interval = 1.0 / max(1, target_fps)
+                ret, frame, decoded_at = reader.get_latest_frame_packet()
+                if ret and frame is not None:
+                    started = time.monotonic()
+                    objects = self._process_registered_frame(frame, decoded_at=decoded_at)
+                    self.last_processing_ms = round((time.monotonic() - started) * 1000, 1)
+                    self.last_frame_age_ms = round(max(0.0, time.time() - decoded_at) * 1000, 1)
             if not ret or frame is None:
                 time.sleep(min(0.01, frame_interval))
                 continue
-
-            with self.lock:
-                objects = self._process_registered_frame(frame)
 
             self.processed_frames += 1
             self._fps_window_frames += 1
@@ -714,7 +726,8 @@ class TemplateIdentityCameraTracker:
             if remaining > 0:
                 time.sleep(remaining)
 
-    def _process_registered_frame(self, frame):
+    def _process_registered_frame(self, frame, decoded_at=None):
+        decoded_at = time.time() if decoded_at is None else decoded_at
         targets = list(self.targets.values())
         mask_targets = [target for target in targets if eligible_target(target)]
         mask_enabled = registered_target_mask_segmenter.available()
@@ -728,6 +741,8 @@ class TemplateIdentityCameraTracker:
                     if eligible_target(target) and obj.get("tracking_state") == "tracked":
                         seeds[target["label"]] = [obj["x"], obj["y"], obj["w"], obj["h"]]
         observations = registered_target_mask_segmenter.track(self.cam_id, frame, mask_targets, seeds) if mask_enabled else {}
+        if time.time() - decoded_at > 0.5:
+            observations = {}
         objects = []
         for target in targets:
             observation = observations.get(target["label"]) if eligible_target(target) else None
@@ -735,24 +750,11 @@ class TemplateIdentityCameraTracker:
                 measured = _normalize_bbox(observation["bbox"])
                 if measured:
                     self._accept_observation(target, measured, observation["mask"]["confidence"])
-                    try:
-                        mask_latency_ms = float(registered_target_mask_segmenter.last_ms)
-                    except (TypeError, ValueError):
-                        mask_latency_ms = 0.0
-                    latency_seconds = min(0.25, max(0.0, mask_latency_ms / 1000.0))
-                    velocity = target.get("velocity") or [0.0, 0.0, 0.0, 0.0]
-                    current_bbox = _normalize_bbox([
-                        measured[0] + velocity[0] * latency_seconds,
-                        measured[1] + velocity[1] * latency_seconds,
-                        measured[2] + velocity[2] * latency_seconds,
-                        measured[3] + velocity[3] * latency_seconds,
-                    ]) or measured
-                    current_mask = advance_mask(observation["mask"], measured, current_bbox)
-                    target["bbox"] = current_bbox
+                    target["bbox"] = measured
                     target["has_matched"] = True
-                    target["mask"] = current_mask
+                    target["mask"] = observation["mask"]
                     obj = self._object_from_target(target)
-                    obj["mask"] = dict(current_mask, observed_at=int(time.time() * 1000))
+                    obj["mask"] = dict(observation["mask"], observed_at=int(decoded_at * 1000))
                     objects.append(obj)
                     continue
             target["mask"] = None
@@ -766,7 +768,11 @@ class TemplateIdentityCameraTracker:
             return {
                 "cam_id": self.cam_id,
                 "target_fps": self.target_fps,
+                "mask_target_fps": self.mask_target_fps,
                 "measured_fps": round(self.measured_fps, 1),
+                "decoder_threads": self.decoder_threads,
+                "last_frame_age_ms": self.last_frame_age_ms,
+                "last_processing_ms": self.last_processing_ms,
                 "processed_frames": self.processed_frames,
                 "motion_enabled": self.motion_enabled,
                 "mask_tracking": registered_target_mask_segmenter.status(),

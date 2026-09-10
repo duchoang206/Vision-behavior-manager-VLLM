@@ -36,3 +36,10 @@ Thumbs.db
 
 # Docker
 *.dockerignore
+
+# Reference and temporary tool folders
+deepstream_reference_apps/
+reference_apps/
+tools/
+backend/.model-tools/
+web-dashboard/.next.stale-*/

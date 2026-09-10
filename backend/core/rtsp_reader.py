@@ -12,14 +12,14 @@ class RTSPLatestFrameReader:
     Keeps only the latest frame in memory using a Queue with maxsize=1.
     This resolves the lag when AI processing FPS is lower than Camera FPS.
     """
-    def __init__(self, rtsp_url, cam_id="Cam_1", max_reconnect_attempts=-1):
+    def __init__(self, rtsp_url, cam_id="Cam_1", max_reconnect_attempts=-1, decoder_threads=None):
         self.rtsp_url = rtsp_url
         self.cam_id = cam_id
         self.max_reconnect_attempts = max_reconnect_attempts
+        self.decoder_threads = decoder_threads
         
         # Initialize video capture
-        self.cap = cv2.VideoCapture(self.rtsp_url)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.cap = self._open_capture()
         
         # Queue that holds maximum 1 frame
         self.frame_queue = queue.Queue(maxsize=1) 
@@ -29,13 +29,24 @@ class RTSPLatestFrameReader:
         self.thread = threading.Thread(target=self._capture_frames, daemon=True)
         self.thread.start()
 
+    def _open_capture(self):
+        if self.decoder_threads is None:
+            capture = cv2.VideoCapture(self.rtsp_url)
+        else:
+            capture = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG, [
+                cv2.CAP_PROP_N_THREADS, max(1, int(self.decoder_threads)),
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC, 2000,
+            ])
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return capture
+
     def _capture_frames(self):
         attempts = 0
         while self.running:
             if not self.cap.isOpened():
                 print(f"[{self.cam_id}] Reconnecting to RTSP stream...")
-                self.cap = cv2.VideoCapture(self.rtsp_url)
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                self.cap = self._open_capture()
                 time.sleep(2)
                 
                 attempts += 1
@@ -49,6 +60,7 @@ class RTSPLatestFrameReader:
             attempts = 0
 
             ret, frame = self.cap.read()
+            decoded_at = time.time()
             if not ret:
                 print(f"[{self.cam_id}] Failed to read frame or stream ended. Attempting to reconnect...")
                 self.cap.release()
@@ -63,7 +75,7 @@ class RTSPLatestFrameReader:
                     pass
             
             # Put the latest frame into the queue
-            self.frame_queue.put(frame)
+            self.frame_queue.put((frame, decoded_at))
 
     def get_latest_frame(self):
         """
@@ -73,10 +85,15 @@ class RTSPLatestFrameReader:
         Returns:
             (bool, np.ndarray): True and the frame if successful, False and None otherwise.
         """
+        available, frame, _ = self.get_latest_frame_packet()
+        return available, frame
+
+    def get_latest_frame_packet(self):
         try:
-            return True, self.frame_queue.get_nowait()
+            frame, decoded_at = self.frame_queue.get_nowait()
+            return True, frame, decoded_at
         except queue.Empty:
-            return False, None
+            return False, None, None
 
     def stop(self):
         """

@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import cv2
@@ -78,25 +79,6 @@ def pixels_bbox(bbox, shape):
     left, top, box_width, box_height = bbox
     return [left * width, top * height, (left + box_width) * width, (top + box_height) * height]
 
-def advance_mask(mask, source_bbox, target_bbox):
-    if not isinstance(mask, dict) or not isinstance(mask.get("polygons"), list):
-        return mask
-    source_x, source_y, source_w, source_h = source_bbox
-    target_x, target_y, target_w, target_h = target_bbox
-    if source_w <= 1e-6 or source_h <= 1e-6:
-        return mask
-    scale_x = target_w / source_w
-    scale_y = target_h / source_h
-    polygons = []
-    for ring in mask["polygons"]:
-        polygons.append([
-            [
-                round(target_x + (point[0] - source_x) * scale_x, 6),
-                round(target_y + (point[1] - source_y) * scale_y, 6),
-            ]
-            for point in ring
-        ])
-    return dict(mask, polygons=polygons)
 
 
 class MaskRuntime:
@@ -113,6 +95,7 @@ class MaskRuntime:
         self.preview = SAM2Predictor(overrides=self.options)
         self.preview.setup_model(verbose=False)
         self.cameras = {}
+        self.shared_features = os.getenv("REGISTERED_MASK_SHARED_FEATURES", "1").lower() not in {"0", "false", "no"}
 
     def segment(self, frame, bbox, points=None, point_labels=None):
         self.preview.reset_image()
@@ -148,12 +131,41 @@ class MaskRuntime:
                 predictor(source=frame, masks=bitmap[None], obj_ids=[0], update_memory=True)
                 entry["seeded"] = True
 
+    @contextmanager
+    def _frame_features(self, frame, predictors):
+        if not self.shared_features or len(predictors) < 2:
+            yield
+            return
+        import torch
+
+        with torch.inference_mode():
+            try:
+                encoder = predictors[0]
+                encoder.reset_image()
+                encoder.setup_source(frame)
+                image = encoder.preprocess([frame])
+                backbone = encoder.model.forward_image(image)
+                for predictor in predictors:
+                    predictor.im = image
+                    predictor.backbone_out = backbone
+                yield
+            finally:
+                for predictor in predictors:
+                    predictor.backbone_out = None
+                    predictor.reset_image()
+
     def track(self, cam_id, frame, seeds):
         state = self.cameras.get(cam_id)
         if state is None:
             return {}
+        entries = {label: entry for label, entry in state["objects"].items()
+                   if entry["seeded"] or label in seeds}
+        with self._frame_features(frame, [entry["predictor"] for entry in entries.values()]):
+            return self._track_objects(frame, entries, seeds)
+
+    def _track_objects(self, frame, entries, seeds):
         observations = {}
-        for label, entry in state["objects"].items():
+        for label, entry in entries.items():
             predictor = entry["predictor"]
             if not entry["seeded"]:
                 if label not in seeds:
@@ -211,6 +223,7 @@ def _worker(connection, model_path):
 class RegisteredTargetMaskSegmenter:
     def __init__(self):
         self.enabled = os.getenv("IDENTITY_TEMPLATE_MASK_ENABLED", "1").lower() not in {"0", "false", "no"}
+        self.shared_features = os.getenv("REGISTERED_MASK_SHARED_FEATURES", "1").lower() not in {"0", "false", "no"}
         self.model_path = os.getenv("REGISTERED_MASK_MODEL_PATH", str(Path(__file__).resolve().parents[1] / "models/sam2.1_t.pt"))
         self._lock = threading.RLock()
         self._process = None
@@ -223,6 +236,9 @@ class RegisteredTargetMaskSegmenter:
 
     def available(self):
         return self.enabled and Path(self.model_path).is_file()
+
+    def frame_slot(self):
+        return self._lock
 
     def _request(self, **payload):
         if not self.available():
@@ -289,7 +305,8 @@ class RegisteredTargetMaskSegmenter:
 
     def status(self):
         return {"enabled": self.enabled, "available": self.available(), "model": Path(self.model_path).name,
-                "backend": "sam2_registered_memory", "last_error": self.last_error, "last_ms": self.last_ms}
+                "backend": "sam2_registered_memory", "shared_features": self.shared_features,
+                "last_error": self.last_error, "last_ms": self.last_ms}
 
     def close(self):
         with self._lock:

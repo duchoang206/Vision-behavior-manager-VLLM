@@ -10,6 +10,7 @@ num-detected-classes=1
 labelfile-path=/app/models_config/labels.txt
 batch-size=2
 network-mode=2
+interval=0
 custom-lib-path=/opt/visionmanager/libperson_pose_parser.so
 parse-bbox-func-name=NvDsInferParseYoloV8Pose
 network-type=0

@@ -98,6 +98,39 @@ và mask đã lưu được giữ lại để có thể dùng cho bước huấn
 không được đưa vào bộ xử lý mask. Đối tượng robot/kệ chưa đăng ký cũng không
 được tự động tô mask.
 
+### Độ trễ mask
+
+Bộ đọc RTSP cho nhãn dùng FFmpeg với `CAP_PROP_N_THREADS=1` ngay khi mở
+camera, kể cả khi kết nối lại. Queue một frame ở Python không loại bỏ được
+độ trễ do bộ giải mã nhiều luồng giữ các frame bên trong.
+Frame được chọn sau khi worker mask sẵn sàng; không dịch hoặc phóng mask
+bằng vận tốc dự đoán. `observed_at` là thời điểm giải mã frame, không phải
+thời điểm kết thúc suy luận; kết quả cũ hơn 500 ms không được xuất thành mask.
+
+Trong `/api/debug/pipeline`, mỗi camera có `decoder_threads`,
+`last_processing_ms` và `last_frame_age_ms`. Hai số thời gian sau đo xử lý và
+tuổi frame **sau giải mã**; không đại diện cho tổng độ trễ camera → trình duyệt.
+Cấu hình này không thay đổi bộ đọc/pipeline nhận diện người.
+
+### Giảm tải GPU cho mask
+
+`REGISTERED_MASK_SHARED_FEATURES=1` (mặc định) tính ảnh đầu vào và backbone
+SAM2 một lần cho các nhãn trên **cùng frame/camera**. Bộ nhớ nhận dạng của mỗi
+nhãn vẫn độc lập. Cache bị xóa sau frame, kể cả khi suy luận lỗi; không dùng
+lại feature của frame trước. Model, FP16, độ phân giải và đường biên mask không
+bị thay đổi bởi tối ưu này. Camera chỉ có một nhãn hoạt động dùng đường xử lý cũ.
+
+`REGISTERED_MASK_TARGET_FPS=11` giới hạn nhịp xử lý nhãn để không tiêu hết phần
+GPU tiết kiệm được vào việc tăng FPS. Mức này cao hơn khoảng 10 FPS/camera đã
+đo trước tối ưu trên máy hiện tại; không phải FPS của video hay landmark người.
+Frame mới nhất vẫn được lấy sau khi worker sẵn sàng, và thời gian nghỉ nằm ngoài
+khóa GPU. Có thể đặt giá trị này thành `24` để ưu tiên tốc độ cập nhật tối đa.
+
+Để đối chiếu/hoàn tác tối ưu, đặt `REGISTERED_MASK_SHARED_FEATURES=0` và
+`REGISTERED_MASK_TARGET_FPS=24` trong environment của dịch vụ backend rồi tạo
+lại container. Trạng thái chia sẻ feature nằm ở `/api/registry/mask/status`;
+FPS và thời gian xử lý riêng từng camera nằm ở `/api/debug/pipeline`.
+
 ---
 
 ## 🤖 Tab "Map Robot 3D" (FMS Digital Twin)
