@@ -1,0 +1,17 @@
+[Unit]
+Description=RTC Server FRONTEND - Process Manager
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/rtcserver/frontend_map_server
+ExecStart=/opt/rtcserver/frontend_map_server/serve.sh -s /opt/rtcserver/frontend_map_server/build/ -l 8081
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment="PATH=/opt/rtcserver/frontend_map_server:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+[Install]
+WantedBy=multi-user.target
