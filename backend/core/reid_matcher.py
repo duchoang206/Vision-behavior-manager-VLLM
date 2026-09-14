@@ -4,6 +4,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any, Set
 from scipy.optimize import linear_sum_assignment
 from core.camera_calibrator import camera_calibrator
+from core.temporal_stabilizer import bbox_iou
 
 
 class DeepTrackState:
@@ -302,6 +303,24 @@ class GlobalReIDMatcher:
         self.local_to_global_map: Dict[Tuple[str, int], int] = {} # (cam_id, local_id) -> global_id
         self.last_cleanup = time.time()
 
+    @staticmethod
+    def _image_continuity(bbox, track, cam_id, now):
+        if track.last_cam_id != cam_id or now - track.last_seen > 1.0:
+            return 0.0
+        current = np.asarray(bbox, dtype=float)
+        best = 0.0
+        for reference in (track.last_bbox, track.kinematics.predict(now)[2]):
+            previous = np.asarray(reference, dtype=float)
+            ratios = current[2:] / np.maximum(previous[2:], 1e-6)
+            if np.any(ratios < 0.45) or np.any(ratios > 2.2):
+                continue
+            distance = np.linalg.norm((current[:2] + current[2:] / 2 - previous[:2] - previous[2:] / 2)
+                                      / np.maximum(previous[2:], 0.03))
+            overlap = bbox_iou(current, previous)
+            if distance <= 0.75 and overlap >= 0.08:
+                best = max(best, 0.75 * overlap + 0.25 * max(0, 1 - distance))
+        return best
+
     def _cleanup_old_tracks(self):
         now = time.time()
         if now - self.last_cleanup < 2.0:
@@ -358,7 +377,7 @@ class GlobalReIDMatcher:
             
             if key in self.local_to_global_map:
                 gid = self.local_to_global_map[key]
-                if gid in self.gallery:
+                if gid in self.gallery and gid not in matched_gids:
                     track = self.gallery[gid]
                     # Verify class match and reasonable spatial bounds
                     pred_fx, pred_fy, _ = track.kinematics.predict(now)
@@ -369,10 +388,14 @@ class GlobalReIDMatcher:
                     r_gate = min(8.5, max(2.5, 2.5 + 1.25 * track.velocity * dt))
                     
                     # Appearance verification if feature available
-                    reid_sim = track.gallery.max_cosine_similarity(feat) if feat is not None else 1.0
+                    reid_sim = track.gallery.max_cosine_similarity(feat) if feat is not None else 0.0
+                    same_camera = track.last_cam_id == cam_id
+                    image_continuity = self._image_continuity(bbox, track, cam_id, now) >= 0.20
+                    same_class = obj_class == track.obj_class
                     
                     # Accept continuity if spatial proximity holds OR appearance strongly matches
-                    if (dist_to_pred <= r_gate) or (reid_sim >= self.sim_threshold):
+                    appearance_conflict = feat is not None and bool(track.gallery.vectors) and reid_sim < 0.5
+                    if same_class and not appearance_conflict and (image_continuity or (feat is not None and reid_sim >= self.sim_threshold)):
                         track.update(cam_id, bbox, (floor_x, floor_y), feat, now)
                         matched_gids.add(gid)
                         
@@ -429,6 +452,15 @@ class GlobalReIDMatcher:
                     r_gate = min(8.5, max(2.5, 2.5 + 1.25 * track.velocity * dt))
                     
                     reid_sim = track.gallery.max_cosine_similarity(det_feat) if det_feat is not None else 0.0
+                    same_camera = track.last_cam_id == cam_id
+                    continuity = self._image_continuity(det["bbox"], track, cam_id, now)
+                    has_appearance = det_feat is not None and bool(track.gallery.vectors)
+                    if not same_camera and (not has_appearance or reid_sim < self.sim_threshold):
+                        continue
+                    if same_camera and continuity < 0.20 and (not has_appearance or reid_sim < self.sim_threshold):
+                        continue
+                    if has_appearance and reid_sim < 0.5:
+                        continue
                     
                     # Fused cost for fast-motion tracking
                     if det_feat is not None and track.gallery.vectors:
@@ -438,9 +470,9 @@ class GlobalReIDMatcher:
                         else:
                             fused_cost = 0.35 * (1.0 - reid_sim) + 0.65 * (floor_dist / r_gate)
                     else:
-                        fused_cost = floor_dist / r_gate
+                        fused_cost = 1.0 - continuity
                         
-                    if floor_dist > r_gate and reid_sim < self.sim_threshold:
+                    if floor_dist > r_gate and reid_sim < self.sim_threshold and continuity < 0.20:
                         fused_cost = 99.0
                         
                     cost_matrix[i, j] = fused_cost
@@ -451,6 +483,11 @@ class GlobalReIDMatcher:
             for r, c in zip(row_ind, col_ind):
                 cost = cost_matrix[r, c]
                 if cost <= 1.0:
+                    alternatives = np.delete(cost_matrix[r], c)
+                    competitors = np.delete(cost_matrix[:, c], r)
+                    if ((alternatives.size and alternatives.min() - cost < 0.08)
+                            or (competitors.size and competitors.min() - cost < 0.08)):
+                        continue
                     det = unmatched_dets[r]
                     gid = candidate_gids[c]
                     track = self.gallery[gid]

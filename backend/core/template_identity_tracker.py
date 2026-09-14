@@ -4,6 +4,7 @@ import base64
 import os
 import threading
 import time
+from contextlib import nullcontext
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import cv2
@@ -12,8 +13,10 @@ import numpy as np
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 from core.identity_utils import identity_global_id, stable_numeric_id
+from core.mediamtx_client import camera_relay_url
 from core.rtsp_reader import RTSPLatestFrameReader
 from core.registered_target_mask import eligible_target, registered_target_mask_segmenter
+from core.mask_motion import MaskMotionPropagator
 
 
 def _normalize_bbox(bbox: Optional[List[float]]) -> Optional[List[float]]:
@@ -75,6 +78,30 @@ def _bbox_from_pixels(frame, rect) -> Optional[List[float]]:
     return _normalize_bbox([x / img_w, y / img_h, w / img_w, h / img_h])
 
 
+def _warp_polygons(
+    polygons: Optional[List[List[List[float]]]],
+    old_bbox: Optional[List[float]],
+    new_bbox: Optional[List[float]],
+) -> Optional[List[List[List[float]]]]:
+    if not polygons or not old_bbox or not new_bbox:
+        return polygons
+    ox, oy, ow, oh = old_bbox
+    nx, ny, nw, nh = new_bbox
+    if ow <= 1e-6 or oh <= 1e-6 or nw <= 1e-6 or nh <= 1e-6:
+        return polygons
+    warped = []
+    for ring in polygons:
+        new_ring = []
+        for pt in ring:
+            rel_x = (pt[0] - ox) / ow
+            rel_y = (pt[1] - oy) / oh
+            px = min(1.0, max(0.0, nx + rel_x * nw))
+            py = min(1.0, max(0.0, ny + rel_y * nh))
+            new_ring.append([round(px, 6), round(py, 6)])
+        warped.append(new_ring)
+    return warped
+
+
 def _create_cv_tracker():
     factories = [
         getattr(cv2, "TrackerCSRT_create", None),
@@ -133,9 +160,11 @@ class TemplateIdentityCameraTracker:
     def __init__(self, cam_id: str, rtsp_url: str, metadata_callback: Callable, target_fps: Optional[int] = None):
         self.cam_id = cam_id
         self.rtsp_url = rtsp_url
+        self.stream_url = camera_relay_url(cam_id)
         self.metadata_callback = metadata_callback
         self.target_fps = target_fps or int(os.getenv("IDENTITY_TEMPLATE_TARGET_FPS", "24"))
         self.mask_target_fps = max(1, int(os.getenv("REGISTERED_MASK_TARGET_FPS", "11")))
+        self.mask_hold_sec = max(0.0, float(os.getenv("REGISTERED_MASK_HOLD_SEC", "0")))
         self.init_min_score = float(os.getenv("IDENTITY_TEMPLATE_INIT_MIN_SCORE", "0.68"))
         self.min_match_score = float(os.getenv("IDENTITY_TEMPLATE_MIN_SCORE", "0.68"))
         self.verify_min_score = float(os.getenv("IDENTITY_TEMPLATE_VERIFY_MIN_SCORE", "0.65"))
@@ -150,6 +179,9 @@ class TemplateIdentityCameraTracker:
         self.lock = threading.RLock()
         self.running = False
         self.thread: Optional[threading.Thread] = None
+        self.lifecycle_lock = threading.RLock()
+        self.stop_event = threading.Event()
+        self.last_error = None
         self.processed_frames = 0
         self.measured_fps = 0.0
         self.decoder_threads = 1
@@ -157,17 +189,26 @@ class TemplateIdentityCameraTracker:
         self.last_processing_ms = 0.0
         self._fps_window_started_at = time.time()
         self._fps_window_frames = 0
+        self.mask_motion = MaskMotionPropagator()
+        self.mask_inference_frames = 0
+        self.motion_frames = 0
 
     def start(self):
-        if self.running:
-            return
-        self.running = True
-        self.thread = threading.Thread(target=self._loop, daemon=True, name=f"identity-template-{self.cam_id}")
-        self.thread.start()
+        with self.lifecycle_lock:
+            if self.thread is not None and self.thread.is_alive():
+                return
+            self.running = True
+            self.stop_event.clear()
+            self.thread = threading.Thread(target=self._loop, daemon=True, name=f"identity-template-{self.cam_id}")
+            self.thread.start()
         print(f"[IdentityTemplate] Started for camera {self.cam_id}", flush=True)
 
     def stop(self):
-        self.running = False
+        with self.lifecycle_lock:
+            self.running = False
+            self.stop_event.set()
+            if self.thread is not None and self.thread is not threading.current_thread():
+                self.thread.join()
 
     def add_target(
         self,
@@ -178,11 +219,30 @@ class TemplateIdentityCameraTracker:
         search_full_frame: bool = False,
         mask: Optional[dict] = None,
         frame_image: Optional[str] = None,
+        reid_vector: Optional[List[float]] = None,
+        reid_vectors: Optional[List[List[float]]] = None,
     ):
         normalized = _normalize_bbox(bbox)
         if normalized is None:
             return False
         template = _decode_crop_image(crop_image)
+        reid_list = []
+        if reid_vectors:
+            for v in reid_vectors:
+                if v and len(v) == 512:
+                    reid_list.append(np.asarray(v, dtype=np.float32).tolist())
+        elif reid_vector and len(reid_vector) == 512:
+            reid_list.append(np.asarray(reid_vector, dtype=np.float32).tolist())
+
+        if not reid_list and template is not None:
+            try:
+                from core.reid_encoder import encode_crop
+                computed_vec = encode_crop(template)
+                if computed_vec and len(computed_vec) == 512:
+                    reid_list.append(computed_vec)
+            except Exception:
+                pass
+
         now = time.time()
         with self.lock:
             existing = self.targets.get(label)
@@ -191,6 +251,10 @@ class TemplateIdentityCameraTracker:
                 if not gallery and existing.get("template") is not None:
                     gallery.append(existing["template"])
                 self._add_template_to_gallery(gallery, template)
+                stored_reid = existing.setdefault("reid_vectors", [])
+                for rv in reid_list:
+                    if not any(np.dot(np.asarray(rv, dtype=np.float32), np.asarray(srv, dtype=np.float32)) > 0.98 for srv in stored_reid):
+                        stored_reid.append(rv)
                 existing.update({
                     "category": category or existing.get("category", "object"),
                     "bbox": normalized,
@@ -204,13 +268,15 @@ class TemplateIdentityCameraTracker:
                     "flow_bbox": None,
                     "flow_age": 0,
                     "motion_age": 0,
-                    "mask": None,
-                    "has_matched": False,
+                    "has_matched": True if mask is not None else False,
                     "velocity": [0.0, 0.0, 0.0, 0.0],
                     "last_observation_at": now,
                     "updated_at": now,
                     "search_full_frame": bool(search_full_frame),
                 })
+                if mask is not None:
+                    existing["mask"] = mask
+                    existing["mask_bbox"] = list(normalized)
                 template_count = len(gallery)
             else:
                 gallery = []
@@ -223,6 +289,7 @@ class TemplateIdentityCameraTracker:
                     "registered_bbox": normalized,
                     "template": template,
                     "templates": gallery,
+                    "reid_vectors": reid_list,
                     "confidence": 1.0,
                     "lost": 0,
                     "cv_tracker": None,
@@ -231,8 +298,9 @@ class TemplateIdentityCameraTracker:
                     "flow_bbox": None,
                     "flow_age": 0,
                     "motion_age": 0,
-                    "mask": None,
-                    "has_matched": False,
+                    "mask": mask,
+                    "mask_bbox": list(normalized) if mask is not None else None,
+                    "has_matched": True if mask is not None else False,
                     "velocity": [0.0, 0.0, 0.0, 0.0],
                     "last_observation_at": now,
                     "updated_at": now,
@@ -241,13 +309,14 @@ class TemplateIdentityCameraTracker:
                 template_count = len(gallery)
             target = self.targets[label]
             target["mask_revision"] = time.monotonic_ns()
+            self.mask_motion.tracks.pop(label, None)
             samples = target.setdefault("mask_samples", [])
             if mask is not None and frame_image:
                 samples.append({"mask": mask, "frame_image": frame_image})
                 del samples[:-16]
         print(
             f"[IdentityTemplate] Learned {label} on {self.cam_id} "
-            f"({template_count}/{self.max_templates} trusted views)",
+            f"({template_count}/{self.max_templates} trusted views, {len(target.get('reid_vectors', []))} ReID features)",
             flush=True,
         )
         return True
@@ -266,6 +335,9 @@ class TemplateIdentityCameraTracker:
     def remove_target(self, label: str):
         with self.lock:
             self.targets.pop(label, None)
+            self.mask_motion.tracks.pop(label, None)
+            if not self.targets:
+                self.mask_motion.reset()
 
     def _object_from_target(
         self,
@@ -277,7 +349,7 @@ class TemplateIdentityCameraTracker:
         bbox = bbox or target["bbox"]
         score = target.get("confidence", 0.0) if confidence is None else confidence
         object_id = identity_global_id(target.get("label"), target.get("category"), target["id"]) or target["id"]
-        return {
+        obj = {
             "id": object_id,
             "local_id": target["id"],
             "class": target["category"],
@@ -290,8 +362,73 @@ class TemplateIdentityCameraTracker:
             "floor_x": round(bbox[0] + bbox[2] / 2.0, 4),
             "floor_y": round(bbox[1] + bbox[3], 4),
             "confidence": round(float(score), 3),
+            "tracking_confidence": round(float(score), 3),
             "tracking_state": state,
         }
+        if target.get("mask_confidence") is not None:
+            obj["mask_confidence"] = round(float(target["mask_confidence"]), 3)
+        if eligible_target(target):
+            mask_data = target.get("mask")
+            mask_bbox = target.get("mask_bbox")
+            if not mask_data and target.get("mask_samples"):
+                for sample in reversed(target["mask_samples"]):
+                    if sample.get("mask"):
+                        mask_data = sample["mask"]
+                        mask_bbox = target.get("registered_bbox") or bbox
+                        break
+            if mask_data and mask_data.get("polygons"):
+                ref_bbox = mask_bbox or target.get("registered_bbox") or bbox
+                warped_rings = _warp_polygons(mask_data["polygons"], ref_bbox, bbox)
+                obj["mask"] = {
+                    **mask_data,
+                    "polygons": warped_rings,
+                    "source": mask_data.get("source", "sam2_motion_tracked"),
+                    "confidence": round(float(score), 3),
+                    "observed_at": int(target.get("mask_observed_at", time.time()) * 1000),
+                }
+                if state == "tracked" and mask_data.get("presence_confidence") is not None:
+                    obj["tracking_confidence"] = float(mask_data["presence_confidence"])
+        obj["image_velocity"] = list(target.get("velocity") or [0.0] * 4)
+        return obj
+
+    def _reid_score_at_bbox(self, frame, target: dict, bbox: List[float]) -> Optional[float]:
+        vectors = target.get("reid_vectors") or ([target.get("reid_vector")] if target.get("reid_vector") else [])
+        if not vectors:
+            return None
+        crop = _crop_from_bbox(frame, bbox)
+        if crop is None or crop.size == 0:
+            return None
+        try:
+            from core.reid_encoder import encode_crop
+            q_vec = encode_crop(crop)
+            if q_vec is None or len(q_vec) != 512:
+                return None
+            q_arr = np.asarray(q_vec, dtype=np.float32)
+            q_norm = float(np.linalg.norm(q_arr))
+            if q_norm < 1e-6:
+                return None
+            q_unit = q_arr / q_norm
+            best_sim = -1.0
+            for t_vec in vectors:
+                t_arr = np.asarray(t_vec, dtype=np.float32)
+                t_norm = float(np.linalg.norm(t_arr))
+                if t_norm > 1e-6:
+                    sim = float(np.dot(q_unit, t_arr / t_norm))
+                    if sim > best_sim:
+                        best_sim = sim
+            return max(0.0, best_sim) if best_sim >= -1.0 else None
+        except Exception:
+            return None
+
+    def _score_at_bbox(self, frame, target: dict, bbox: List[float]) -> float:
+        tmpl_score = self._template_score_at_bbox(frame, target, bbox)
+        if tmpl_score < self.verify_min_score:
+            return tmpl_score
+        reid_score = self._reid_score_at_bbox(frame, target, bbox)
+        if reid_score is not None:
+            target["last_reid_score"] = round(reid_score, 4)
+            return (reid_score * 0.55) + (tmpl_score * 0.45)
+        return tmpl_score
 
     def _template_score_at_bbox(self, frame, target: dict, bbox: List[float]) -> float:
         templates = target.get("templates") or ([target.get("template")] if target.get("template") is not None else [])
@@ -332,8 +469,20 @@ class TemplateIdentityCameraTracker:
             pred_h,
         ]) or list(bbox)
 
-    def _accept_observation(self, target: dict, measured_bbox: List[float], score: float) -> List[float]:
-        now = time.time()
+    def _plausible_motion_bbox(self, frame, target: dict, candidate: List[float]) -> bool:
+        if target.get("lost", 0) > 0:
+            return True
+        previous_center = np.asarray(_bbox_center(target["bbox"]))
+        candidate_center = np.asarray(_bbox_center(candidate))
+        jump = float(np.linalg.norm(candidate_center - previous_center) /
+                     max(0.02, target["bbox"][2], target["bbox"][3]))
+        if jump <= 0.9:
+            return True
+        reid_score = self._reid_score_at_bbox(frame, target, candidate)
+        return reid_score is not None and reid_score >= 0.78
+
+    def _accept_observation(self, target: dict, measured_bbox: List[float], score: float, observed_at=None) -> List[float]:
+        now = time.time() if observed_at is None else observed_at
         old_bbox = target["bbox"]
         dt = max(1.0 / max(1, self.target_fps), now - target.get("last_observation_at", now))
         old_cx, old_cy = _bbox_center(old_bbox)
@@ -603,7 +752,7 @@ class TemplateIdentityCameraTracker:
             target["templates"] = [template]
 
         if not target.get("has_matched"):
-            score = self._template_score_at_bbox(frame, target, bbox)
+            score = self._score_at_bbox(frame, target, bbox)
             candidate_bbox = bbox
             if score < self.init_min_score:
                 found = self._local_template_search(frame, target)
@@ -629,16 +778,16 @@ class TemplateIdentityCameraTracker:
                 ok, rect = False, None
             if ok:
                 tracked_bbox = _bbox_from_pixels(frame, rect)
-                if tracked_bbox:
-                    verify_score = self._template_score_at_bbox(frame, target, tracked_bbox)
+                if tracked_bbox and self._plausible_motion_bbox(frame, target, tracked_bbox):
+                    verify_score = self._score_at_bbox(frame, target, tracked_bbox)
                     if verify_score >= self.verify_min_score:
                         self._accept_observation(target, tracked_bbox, verify_score)
                         self._init_optical_flow(frame, target, tracked_bbox)
                         return self._object_from_target(target, confidence=verify_score)
 
         flow_bbox = self._update_optical_flow(frame, target) if use_motion else None
-        if flow_bbox is not None:
-            verify_score = self._template_score_at_bbox(frame, target, flow_bbox)
+        if flow_bbox is not None and self._plausible_motion_bbox(frame, target, flow_bbox):
+            verify_score = self._score_at_bbox(frame, target, flow_bbox)
             if verify_score >= self.verify_min_score:
                 self._accept_observation(target, flow_bbox, verify_score)
                 if target.get("flow_age", 0) >= 12:
@@ -648,7 +797,11 @@ class TemplateIdentityCameraTracker:
         found = self._local_template_search(frame, target)
         if found:
             found_bbox, score = found
-            if score >= self.min_match_score:
+            previous_center = np.asarray(_bbox_center(target["bbox"]))
+            found_center = np.asarray(_bbox_center(found_bbox))
+            jump = float(np.linalg.norm(found_center - previous_center) /
+                         max(0.02, target["bbox"][2], target["bbox"][3]))
+            if score >= self.min_match_score and (target.get("lost", 0) > 0 or jump <= 0.9):
                 self._accept_observation(target, found_bbox, score)
                 self._init_motion_tracker(frame, target, found_bbox)
                 return self._object_from_target(target, confidence=score)
@@ -666,30 +819,71 @@ class TemplateIdentityCameraTracker:
         return None
 
     def _loop(self):
-        reader = RTSPLatestFrameReader(self.rtsp_url, cam_id=f"identity-{self.cam_id}",
-                                       decoder_threads=self.decoder_threads)
         try:
-            self._process_frames(reader)
+            while self.running:
+                reader = None
+                try:
+                    reader = RTSPLatestFrameReader(self.stream_url, cam_id=f"identity-{self.cam_id}",
+                                                   decoder_threads=self.decoder_threads)
+                    self.last_error = None
+                    self._process_frames(reader)
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    print(f"[IdentityTemplate] Retrying camera {self.cam_id}: {exc}", flush=True)
+                finally:
+                    self.mask_motion.reset()
+                    if reader is not None:
+                        reader.stop()
+                if self.running:
+                    self.stop_event.wait(1.0)
         finally:
-            reader.stop()
-            registered_target_mask_segmenter.remove_camera(self.cam_id)
+            try:
+                registered_target_mask_segmenter.remove_camera(self.cam_id)
+            finally:
+                self.running = False
         print(f"[IdentityTemplate] Stopped for camera {self.cam_id}", flush=True)
 
     def _process_frames(self, reader):
         frame_interval = 1.0 / max(1, self.target_fps)
         while self.running:
             t0 = time.time()
-            with self.lock, registered_target_mask_segmenter.frame_slot():
-                target_fps = min(self.target_fps, self.mask_target_fps) if any(
+            with self.lock:
+                has_masks = registered_target_mask_segmenter.available() and any(
                     eligible_target(target) for target in self.targets.values()
-                ) else self.target_fps
+                )
+                target_fps = min(self.target_fps, self.mask_target_fps) if has_masks else self.target_fps
                 frame_interval = 1.0 / max(1, target_fps)
-                ret, frame, decoded_at = reader.get_latest_frame_packet()
-                if ret and frame is not None:
-                    started = time.monotonic()
-                    objects = self._process_registered_frame(frame, decoded_at=decoded_at)
-                    self.last_processing_ms = round((time.monotonic() - started) * 1000, 1)
-                    self.last_frame_age_ms = round(max(0.0, time.time() - decoded_at) * 1000, 1)
+                slot = registered_target_mask_segmenter.try_frame_slot(self.cam_id, 1 / self.mask_target_fps) if has_masks else nullcontext(True)
+                with slot as can_infer:
+                    ret, frame, decoded_at = reader.get_latest_frame_packet()
+                    if ret and frame is not None:
+                        started = time.monotonic()
+                        if can_infer:
+                            objects = self._process_registered_frame(frame, decoded_at=decoded_at)
+                            if has_masks:
+                                self.mask_motion.seed(frame, objects, decoded_at)
+                                self.mask_inference_frames += 1
+                        else:
+                            objects = self.mask_motion.update(frame, decoded_at)
+                            propagated_labels = {obj.get("label") for obj in objects}
+                            for target in self.targets.values():
+                                if eligible_target(target) and target.get("mask") and target.get("mask_observed_at") and target.get("label") not in propagated_labels:
+                                    age = decoded_at - target["mask_observed_at"]
+                                    if 0 <= age <= self.mask_hold_sec:
+                                        held = self._object_from_target(
+                                            target,
+                                            confidence=float(target.get("confidence", 0.0)) * max(0.35, 1.0 - age),
+                                            state="predicted",
+                                            bbox=self._predict_bbox(target, now=decoded_at),
+                                        )
+                                        held.update(observed_at=int(decoded_at * 1000), mask_stale=True,
+                                                    mask_age=round(age, 3))
+                                        objects.append(held)
+                            objects.extend(obj for target in self.targets.values() if not eligible_target(target)
+                                           for obj in [self._match_target(frame, target)] if obj)
+                            self.motion_frames += 1
+                        self.last_processing_ms = round((time.monotonic() - started) * 1000, 1)
+                        self.last_frame_age_ms = round(max(0.0, time.time() - decoded_at) * 1000, 1)
             if not ret or frame is None:
                 time.sleep(min(0.01, frame_interval))
                 continue
@@ -740,33 +934,62 @@ class TemplateIdentityCameraTracker:
                     fallback[target["label"]] = obj
                     if eligible_target(target) and obj.get("tracking_state") == "tracked":
                         seeds[target["label"]] = [obj["x"], obj["y"], obj["w"], obj["h"]]
+            elif eligible_target(target) and target.get("bbox") and not target.get("mask"):
+                seeds[target["label"]] = target["bbox"]
         observations = registered_target_mask_segmenter.track(self.cam_id, frame, mask_targets, seeds) if mask_enabled else {}
-        if time.time() - decoded_at > 0.5:
+        max_mask_age = float(os.getenv("REGISTERED_MASK_MAX_AGE", "0.5"))
+        if time.time() - decoded_at > max_mask_age:
             observations = {}
+            for target in targets:
+                target["mask"] = None
+            return []
         objects = []
         for target in targets:
             observation = observations.get(target["label"]) if eligible_target(target) else None
             if observation and observation.get("mask"):
                 measured = _normalize_bbox(observation["bbox"])
                 if measured:
-                    self._accept_observation(target, measured, observation["mask"]["confidence"])
+                    first_mask = not target.get("mask_observed_at")
+                    self._accept_observation(target, measured, observation["mask"]["confidence"], observed_at=decoded_at)
                     target["bbox"] = measured
+                    if first_mask:
+                        target["velocity"] = [0.0] * 4
                     target["has_matched"] = True
                     target["mask"] = observation["mask"]
-                    obj = self._object_from_target(target)
-                    obj["mask"] = dict(observation["mask"], observed_at=int(decoded_at * 1000))
+                    target["mask_bbox"] = measured
+                    target["mask_confidence"] = observation["mask"].get("confidence")
+                    target["mask_observed_at"] = decoded_at
+                    obj = self._object_from_target(target, bbox=measured)
+                    obj.update(observed_at=int(decoded_at * 1000), observation_bbox=measured, mask_stale=False)
                     objects.append(obj)
                     continue
+
+            if target.get("mask") and target.get("mask_observed_at") and time.time() - target["mask_observed_at"] <= self.mask_hold_sec:
+                obj = self._object_from_target(target, confidence=float(target.get("confidence", 0)) * 0.8,
+                                               state="predicted", bbox=self._predict_bbox(target, now=decoded_at))
+                obj.update(observed_at=int(decoded_at * 1000), mask_stale=True, image_velocity=[0.0] * 4)
+                objects.append(obj)
+                continue
             target["mask"] = None
-            target["lost"] = target.get("lost", 0) + (0 if target["label"] in fallback else 1)
             if target["label"] in fallback:
                 objects.append(fallback[target["label"]])
+            elif not mask_enabled or not eligible_target(target):
+                matched_obj = self._match_target(frame, target)
+                if matched_obj:
+                    objects.append(matched_obj)
+                else:
+                    target["lost"] = target.get("lost", 0) + 1
+        for obj in objects:
+            obj.setdefault("observed_at", int(decoded_at * 1000))
         return objects
 
     def debug_state(self):
         with self.lock:
             return {
                 "cam_id": self.cam_id,
+                "running": self.running,
+                "stream_source": "mediamtx_relay",
+                "last_error": self.last_error,
                 "target_fps": self.target_fps,
                 "mask_target_fps": self.mask_target_fps,
                 "measured_fps": round(self.measured_fps, 1),
@@ -774,6 +997,8 @@ class TemplateIdentityCameraTracker:
                 "last_frame_age_ms": self.last_frame_age_ms,
                 "last_processing_ms": self.last_processing_ms,
                 "processed_frames": self.processed_frames,
+                "mask_inference_frames": self.mask_inference_frames,
+                "motion_frames": self.motion_frames,
                 "motion_enabled": self.motion_enabled,
                 "mask_tracking": registered_target_mask_segmenter.status(),
                 "targets": [
@@ -800,23 +1025,25 @@ class TemplateIdentityTrackerManager:
         self.trackers: Dict[str, TemplateIdentityCameraTracker] = {}
         self.metadata_callback: Optional[Callable] = None
         self.lock = threading.RLock()
+        self.lifecycle_lock = threading.RLock()
 
     def add_camera(self, cam_id: str, rtsp_url: str):
-        with self.lock:
+        with self.lifecycle_lock, self.lock:
             if cam_id in self.trackers:
                 tracker = self.trackers[cam_id]
                 tracker.metadata_callback = self.metadata_callback
+                tracker.rtsp_url = rtsp_url
                 return tracker
             tracker = TemplateIdentityCameraTracker(cam_id, rtsp_url, self.metadata_callback)
             self.trackers[cam_id] = tracker
-            tracker.start()
             return tracker
 
     def remove_camera(self, cam_id: str):
-        with self.lock:
-            tracker = self.trackers.pop(cam_id, None)
-        if tracker:
-            tracker.stop()
+        with self.lifecycle_lock:
+            with self.lock:
+                tracker = self.trackers.pop(cam_id, None)
+            if tracker:
+                tracker.stop()
 
     def add_target(
         self,
@@ -829,21 +1056,37 @@ class TemplateIdentityTrackerManager:
         search_full_frame: bool = False,
         mask: Optional[dict] = None,
         frame_image: Optional[str] = None,
+        reid_vector: Optional[List[float]] = None,
+        reid_vectors: Optional[List[List[float]]] = None,
     ):
-        tracker = self.add_camera(cam_id, rtsp_url)
-        return tracker.add_target(label, category, bbox, crop_image, search_full_frame=search_full_frame,
-                                  mask=mask, frame_image=frame_image)
+        with self.lifecycle_lock:
+            tracker = self.add_camera(cam_id, rtsp_url)
+            success = tracker.add_target(
+                label,
+                category,
+                bbox,
+                crop_image,
+                search_full_frame=search_full_frame,
+                mask=mask,
+                frame_image=frame_image,
+                reid_vector=reid_vector,
+                reid_vectors=reid_vectors,
+            )
+            if success:
+                tracker.start()
+            return success
 
     def remove_target(self, label: str, cam_id: Optional[str] = None):
-        with self.lock:
-            if cam_id:
-                tracker = self.trackers.get(cam_id)
-                if tracker:
-                    tracker.remove_target(label)
-                return
-            trackers = list(self.trackers.values())
-        for tracker in trackers:
-            tracker.remove_target(label)
+        with self.lifecycle_lock:
+            with self.lock:
+                camera_ids = [cam_id] if cam_id else list(self.trackers)
+            for camera_id in camera_ids:
+                tracker = self.trackers.get(camera_id)
+                if tracker is None:
+                    continue
+                tracker.remove_target(label)
+                if not tracker.targets:
+                    self.remove_camera(camera_id)
 
     def active_cameras(self):
         with self.lock:
@@ -900,7 +1143,8 @@ class TemplateIdentityTrackerManager:
 
     def debug_state(self):
         with self.lock:
-            return {cam_id: tracker.debug_state() for cam_id, tracker in self.trackers.items()}
+            trackers = list(self.trackers.items())
+        return {cam_id: tracker.debug_state() for cam_id, tracker in trackers}
 
 
 template_identity_tracker_manager = TemplateIdentityTrackerManager()
