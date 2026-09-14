@@ -16,6 +16,7 @@
 - [4. Hướng dẫn cài đặt & Khởi động nhanh](#-4-hướng-dẫn-cài-đặt--khởi-động-nhanh)
 - [5. Danh mục cổng dịch vụ (Ports)](#-5-danh-mục-cổng-dịch-vụ-ports)
 - [6. Lệnh quản trị hữu ích](#-6-lệnh-quản-trị-hữu-ích)
+- [7. Tối ưu tài nguyên](#7-tối-ưu-tài-nguyên)
 
 ---
 
@@ -109,6 +110,29 @@ Trung tâm phân tích dữ liệu thị giác máy tính và hiệu suất vậ
 
 ---
 
+### 2.5. Workflow Editor - Tùy chọn tính năng Vision
+
+Mở **Workflow Editor** ở sidebar hoặc đường dẫn `/?tab=workflow_editor`.
+
+1. Chọn **Camera Source** trên canvas rồi chọn camera đã đăng ký trong Building.
+2. Thêm block bằng nút **+** hoặc kéo từ thư viện; nối cổng bên phải (output) vào cổng bên trái (input). Có thể phân nhánh và gộp kết quả; không cho phép vòng lặp.
+3. Cấu hình từng block ở Inspector. ROI Filter / Dwell Time dùng polygon và Line Crossing dùng tripwire có thật của camera trong Building. Sửa hình học ROI cần triển khai lại để cập nhật.
+4. **Lưu Workflow** chỉ lưu bản nháp trên server. **Triển khai Pipeline** kiểm tra toàn bộ đồ thị rồi áp dụng lên metadata Vision trực tiếp; kết quả, số lượng và thời điểm cập nhật hiển thị dưới canvas.
+5. **Dừng** chỉ dừng workflow, không dừng camera, detector, Calibration hay kết nối FMS. Workflow tiếp tục xử lý trên backend khi chuyển tab hoặc đóng trình duyệt.
+
+- Hỗ trợ kéo node, zoom/fit, xóa kết nối, nhân bản, Undo/Redo, Import/Export JSON; `Ctrl+S` lưu và `Ctrl+Z` hoàn tác. Bản nháp chưa lưu có bản sao phục hồi trên trình duyệt.
+- Object Detector lọc confidence của nhận diện hiện có; Class Filter lọc lớp đối tượng; Object Matcher lọc nhãn do tracker đã gán. Các block này không nạp model AI mới.
+- ROI và cắt vạch dùng điểm tiếp xúc đáy bounding box trong tọa độ camera normalized `0..1`. Dwell Time đo thời gian hiện diện liên tục; mất track hoặc gián đoạn quá 2 giây sẽ bắt đầu lại. Object Counter đếm trên frame, không phải tổng lượt tích lũy.
+- Display Output hiển thị tại editor và API runtime, chưa thay thế overlay Monitor / Map. **Alert / Webhook chưa hỗ trợ thực thi**, được vô hiệu hóa trong thư viện.
+- Mỗi lần triển khai chạy một workflow với một camera, có thể có nhiều nhánh/output. Tắt block xử lý là bỏ qua bước đó và truyền dữ liệu tiếp; không tắt Camera Source hoặc Display Output.
+- API: `GET /api/workflow`, `POST /api/workflow/draft`, `POST /api/workflow/deploy`, `POST /api/workflow/stop`, `GET /api/workflow/runtime`. Ghi dữ liệu cần `revision` hiện tại để tránh ghi đè phiên khác.
+- Lưu nguyên tử vào `backend/data/workflows.json` (hoặc `WORKFLOW_STORE_PATH`). Bản triển khai được khôi phục khi backend khởi động lại. Dùng một backend worker sở hữu camera và engine; chưa hỗ trợ đồng bộ workflow giữa nhiều worker/process.
+- Editor lấy trạng thái và danh sách robot từ FMS mỗi 2 giây, ngay cả khi chuyển tab. Chỉ báo LIVE khi MQTT đang kết nối và gói tin gần nhất chưa quá 10 giây; dữ liệu workflow quá 5 giây được đánh dấu cũ.
+
+Kiểm thử phần workflow: `docker exec yolo_deepstream_backend sh -c 'cd /app && PYTHONPATH=/app:/app/tests python3 -m unittest discover -s tests -p "test_workflow*.py" -v'`.
+
+---
+
 ## 🧠 3. Công nghệ AI & Thị giác máy tính
 
 | Thành phần AI | Công nghệ / Framework | Vai trò & Tính năng |
@@ -131,6 +155,8 @@ Trung tâm phân tích dữ liệu thị giác máy tính và hiệu suất vậ
 * **Phần mềm**: Docker & NVIDIA Container Toolkit, Node.js 18+, Python 3.10+.
 
 ### Khởi động toàn bộ hệ thống bằng 1 lệnh:
+Trên máy mới, tạo `web-dashboard/.env.local` theo `web-dashboard/.env.example` và điền `RSKYVIEW_SESSION_SECRET` riêng (tối thiểu 32 ký tự). Frontend production được build ở lần chạy đầu nếu chưa có image; không cài npm hay chạy hot-reload mỗi lần khởi động.
+
 ```bash
 cd "/home/rtcai/Desktop/Vision Manager"
 ./run_all.sh
@@ -148,6 +174,14 @@ cd "/home/rtcai/Desktop/Vision Manager"
 | 📹 **MediaMTX WebRTC Streamer** | [http://localhost:8081](http://localhost:8081) | Máy chủ phân phối luồng WHEP WebRTC siêu độ trễ thấp |
 | 🗄️ **PostgreSQL FMS DB** | `localhost:5432` | Cơ sở dữ liệu lưu trữ lịch sử sự kiện & layout bản đồ |
 
+### Truy cập video qua IP LAN
+
+- Mở `http://192.168.5.212:3000` trên máy trong cùng mạng; giao diện và camera dùng chung dữ liệu với `localhost:3000`.
+- Dashboard chuyển tiếp WHEP qua `/api/stream/<camera-id>/whep` trên cổng 3000, không yêu cầu trình duyệt gọi trực tiếp cổng 8081. Có thể cấu hình `MEDIAMTX_WHEP_ORIGIN` trên frontend nếu gateway nằm ở máy khác.
+- Video WebRTC vẫn truyền trực tiếp qua cổng **18189 UDP/TCP**; cho phép cổng này giữa máy xem và server. Metadata tracking dùng cổng **8000 TCP**. Chỉ forward cổng 3000 ra Internet không đủ cho video WebRTC.
+- Khi đổi IP server, cập nhật `webrtcAdditionalHosts` trong `services/mediamtx/mediamtx.yml` và `allowedDevOrigins` trong `web-dashboard/next.config.ts` nếu chạy chế độ dev.
+- Backend tự đồng bộ đường dẫn camera mỗi 10 giây để khôi phục stream sau khi MediaMTX khởi động lại. Player tự kết nối lại khi stream tạm ngắt.
+
 ---
 
 ## 🛠️ 6. Lệnh quản trị hữu ích
@@ -164,3 +198,21 @@ cd "/home/rtcai/Desktop/Vision Manager"
   ```bash
   ./run_all.sh stop
   ```
+
+## 7. Tối ưu tài nguyên
+
+- **Calibration chỉ lấy một ảnh JPEG mới nhất** khi mở tab, đổi camera hoặc nhấn **Frame mới nhất**. Không mở WebRTC hay tự tải lại ảnh định kỳ. Backend ưu tiên dùng frame đã giải mã gần nhất (không quá 500 ms), không lấy mất frame của tracker; nếu chưa có thì chụp RTSP một lần và đóng decoder. Các yêu cầu trùng camera được gộp, tối đa hai lần chụp/encode đồng thời. Giữ nguyên độ phân giải và JPEG quality 85.
+- **Tab không hiển thị ngừng tác vụ giao diện**: đóng WebRTC/WebSocket, hủy reconnect/timer/render loop, thu hồi texture/geometry/WebGL của Map 3D. Building, Calibration và Workflow giữ bản nháp trong phiên trình duyệt khi chuyển tab. Khi mở lại Monitor, video cần kết nối WebRTC lại; pipeline tracking backend không bị dừng.
+- **Không đổi thuật toán tracking**: giữ model, target FPS, ngưỡng, ID, khả năng tìm lại đối tượng và nội suy khi tab đang mở. FMS vẫn được backend nhận liên tục, độc lập với tab và đăng nhập. Decoder template chỉ chạy khi camera có target đăng ký; chỉ giải phóng SAM2 khi không còn camera dùng nó.
+- **Metadata nhẹ hơn**: không gửi vector Re-ID nội bộ trong WebSocket dashboard; server vẫn giữ vector cho định danh. Bbox, mask, pose, timestamp và FMS không bị giảm tần suất hay lược bỏ.
+- **Chatbot RAG tải theo nhu cầu**: ChromaDB/PDF được khởi tạo khi hỏi chatbot lần đầu và xử lý ngoài event loop. Lần hỏi đầu có thể lâu hơn; không preload tài nguyên chatbot khi chỉ giám sát camera.
+- **Frontend production** chạy image standalone, không chạy `next dev`/npm install trong lúc vận hành. `.env.local` chỉ nạp lúc chạy, không đưa secret vào image.
+
+Sau khi sửa frontend, cập nhật riêng dashboard, không restart tracking/FMS:
+
+```bash
+./run_all.sh build-frontend
+docker compose up -d --no-deps frontend
+```
+
+Thay đổi Python trong backend có hiệu lực sau `docker compose restart backend`; chọn thời điểm phù hợp vì restart làm gián đoạn tạm thời tracking/FMS và khởi tạo lại model. Khi phát triển giao diện, dùng `npm ci && npm run dev` trong `web-dashboard` (dừng frontend container trước nếu cùng dùng cổng 3000).

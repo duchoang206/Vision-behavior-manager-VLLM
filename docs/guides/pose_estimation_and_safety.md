@@ -1,7 +1,7 @@
 # Hướng dẫn nhận diện dáng người và cảnh báo ngã lao động (Pose & Safety Rules)
 
 ## 1. 17 Điểm khớp xương (COCO Pose Keypoints)
-Mô hình YOLOv8x-Pose phát hiện 17 điểm mốc:
+Mô hình YOLO11l-Pose phát hiện 17 điểm mốc, cùng định dạng COCO-17 với YOLOv8x-Pose trước đây:
 - 0: Mũi, 1-2: Mắt (trái/phải), 3-4: Tai (trái/phải)
 - 5-6: Vai (trái/phải), 7-8: Khuỷu tay (trái/phải), 9-10: Cổ tay (trái/phải)
 - 11-12: Khớp hông (trái/phải), 13-14: Đầu gối (trái/phải), 15-16: Mắt cá chân (trái/phải)
