@@ -19,6 +19,10 @@ case "$1" in
     echo "Building backend image explicitly (engines and registry stay on host volumes)..."
     sudo docker compose build backend
     ;;
+  build-frontend)
+    echo "Building the production dashboard (backend and tracking stay online)..."
+    sudo docker compose build frontend
+    ;;
   status|ps)
     sudo docker compose ps
     ;;
@@ -28,9 +32,9 @@ case "$1" in
     echo "================================================================="
     echo ""
     echo "[1/2] Launching containers (Postgres, MediaMTX, Backend + FMS Bridge, Web Dashboard)..."
-    # Source/config changes are visible through bind mounts.  Do not rebuild
-    # the DeepStream image on every restart; use './run_all.sh build' only
-    # after changing Dockerfile or Python dependencies.
+    if ! sudo docker image inspect rskyview-frontend:local >/dev/null 2>&1; then
+      sudo docker compose build frontend || exit 1
+    fi
     sudo docker compose up -d --no-build --remove-orphans
 
     if [ $? -ne 0 ]; then
@@ -56,6 +60,7 @@ case "$1" in
     echo "  Commands:"
     echo "  - View live logs : ./run_all.sh logs"
     echo "  - Check status   : ./run_all.sh status"
+    echo "  - Build dashboard: ./run_all.sh build-frontend"
     echo "  - Stop system    : ./run_all.sh stop"
     echo "================================================================="
     ;;

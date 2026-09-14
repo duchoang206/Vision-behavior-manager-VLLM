@@ -47,6 +47,11 @@ ENV LD_LIBRARY_PATH="/opt/nvidia/deepstream/deepstream/lib:${LD_LIBRARY_PATH}"
 # multi-hundred-megabyte PyTorch/CUDA stack just to install the export helper.
 RUN pip3 install --break-system-packages --no-deps --default-timeout=1000 --no-cache-dir ultralytics opencv-python-headless pillow torchvision
 
+RUN apt-get update && apt-get install --reinstall -y --no-install-recommends \
+    ffmpeg libvpx9 libmp3lame0 libx264-164 libx265-199 libmpg123-0t64 libflac12t64 \
+    && ffmpeg -version >/dev/null && ffprobe -version >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

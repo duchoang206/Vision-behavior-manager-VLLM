@@ -13,6 +13,7 @@ webrtc: yes
 webrtcAddress: :8081
 webrtcICEUDPMuxAddress: :18189
 webrtcICETCPMuxAddress: :18189
+webrtcAdditionalHosts: ["192.168.5.212", "127.0.0.1"]
 readBufferCount: 4096
 
 paths:

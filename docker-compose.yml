@@ -25,7 +25,7 @@ services:
           devices:
             - driver: nvidia
               count: 1
-              capabilities: [gpu]
+              capabilities: [ gpu ]
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ./backend:/app
@@ -34,6 +34,7 @@ services:
       - ./backend/models:/app/models
       - ./backend/models_config/weights:/app/models_config/weights
       - ./backend/data:/app/data
+      - ${RECORDINGS_HOST_DIR:-./recordings}:/var/vms/recordings
       - ./backend/models_config/DeepStream-Yolo/nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so:/opt/visionmanager/libnvdsinfer_custom_impl_Yolo.so:ro
       - ./backend/models_config/libperson_pose_parser.so:/opt/visionmanager/libperson_pose_parser.so:ro
     environment:
@@ -44,21 +45,30 @@ services:
       - DISABLE_DEEPSTREAM_GST=0
       - ENABLE_CPU_TRACKER_FALLBACK=0
       - CPU_TRACKER_PERSON_ONLY=1
-      - POSE_MODEL_PATH=/app/models/yolov8x-pose.pt
+      - POSE_MODEL_PATH=/app/models/yolo11l-pose.pt
       - FMS_IP=192.168.5.105
       - FMS_MQTT_PORT=1883
       - FMS_ORIGIN_X=185.0
       - FMS_ORIGIN_Y=194.5
       - FMS_LAYOUT_DEPTH=18.0
-      - DEEPSTREAM_ONNX_FILE=/app/models/yolov8x-pose.onnx
-      - DEEPSTREAM_ENGINE_FILE=/app/models/yolov8x-pose_b2_gpu0_fp16.engine
+      - DEEPSTREAM_ONNX_FILE=/app/models/yolo11l-pose.onnx
+      - DEEPSTREAM_ENGINE_FILE=/app/models/yolo11l-pose_b2_gpu0_fp16.engine
       - DEEPSTREAM_LABELS_FILE=/app/models_config/labels.txt
       - DEEPSTREAM_BATCH_SIZE=2
       # Project-local NvDCF config: GPU correlation tracker without the
       # optional sample ReID engine that is not shipped in the container.
       - DEEPSTREAM_TRACKER_CONFIG=/app/models_config/tracker_config.yml
       - REID_ONNX_FILE=/app/models/reid_512.onnx
-      - CPU_TRACKER_MODEL_PATH=/app/models/yolov8x-pose.pt
+      - CPU_TRACKER_MODEL_PATH=/app/models/yolo11l-pose.pt
+      - RECORDINGS_DIR=/var/vms/recordings
+      - ENABLE_EVIDENCE_RECORDING=1
+      - RECORDING_SEGMENT_SECONDS=3600
+      - RECORDING_RETENTION_HOURS=48
+      - RECORDING_MIN_FREE_GB=2
+      - IDENTITY_TEMPLATE_ENABLE_MOTION=1
+      - IDENTITY_TEMPLATE_TARGET_FPS=25
+      - REGISTERED_MASK_TARGET_FPS=15
+      - REGISTERED_MASK_HOLD_SEC=0.25
 
   mediamtx:
     image: bluenviron/mediamtx:latest
@@ -69,14 +79,15 @@ services:
       - ./services/mediamtx/mediamtx.yml:/mediamtx.yml
 
   frontend:
-    image: node:20-alpine
+    build:
+      context: ./web-dashboard
+      dockerfile: Dockerfile
+    image: rskyview-frontend:local
     container_name: yolo_frontend
     restart: always
     network_mode: host
-    working_dir: /app
-    volumes:
-      - ./web-dashboard:/app
-    command: sh -c "npm install && npm run dev"
+    env_file:
+      - ./web-dashboard/.env.local
 
 volumes:
   postgres_data:
