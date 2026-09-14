@@ -1,4 +1,7 @@
 import json
+import copy
+import threading
+import cv2
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
@@ -13,6 +16,7 @@ class CameraCalibrator:
         self.homographies: Dict[str, np.ndarray] = {}
         # cam_id -> Calibration points {"src_points": [[x,y]...], "dst_points": [[x,y]...]}
         self.configs: Dict[str, dict] = {}
+        self.lock = threading.RLock()
 
     def set_calibration(self, cam_id: str, src_points: List[List[float]], dst_points: List[List[float]], cam_x: float = None, cam_y: float = None, cam_z: float = None, yaw: float = None) -> bool:
         """
@@ -20,44 +24,52 @@ class CameraCalibrator:
         src_points: 4 points in camera normalized coords [[x0,y0], [x1,y1], [x2,y2], [x3,y3]]
         dst_points: 4 points in floor plan coords [[X0,Y0], [X1,Y1], [X2,Y2], [X3,Y3]]
         """
-        if len(src_points) < 4 or len(dst_points) < 4:
-            return False
-            
-        src_pts = np.array(src_points[:4], dtype=np.float32)
-        dst_pts = np.array(dst_points[:4], dtype=np.float32)
-        
         try:
-            # Solve Homography: H * src = dst using Direct Linear Transformation (DLT)
-            H = self._compute_homography_dlt(src_pts, dst_pts)
-            if H is not None:
-                self.homographies[cam_id] = H
-                
-                # Calculate FOV polygon by projecting the 4 corners of the video frame
-                frame_corners = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
-                fov_polygon = []
-                for cx, cy in frame_corners:
-                    pt = np.array([cx, cy, 1.0], dtype=np.float32)
-                    floor_pt = np.dot(H, pt)
-                    if abs(floor_pt[2]) > 1e-7:
-                        fov_polygon.append([float(floor_pt[0] / floor_pt[2]), float(floor_pt[1] / floor_pt[2])])
-                    else:
-                        fov_polygon.append([cx, cy])
-                
-                self.configs[cam_id] = {
-                    "src_points": src_points,
-                    "dst_points": dst_points,
-                    "matrix": H.tolist(),
-                    "cam_x": cam_x,
-                    "cam_y": cam_y,
-                    "cam_z": cam_z,
-                    "yaw": yaw,
-                    "fov_polygon": fov_polygon
-                }
-                return True
-        except Exception as e:
-            print(f"[CameraCalibrator] Failed to compute homography for {cam_id}: {e}")
-            
-        return False
+            config = self.prepare_config(src_points, dst_points)
+            config.update(cam_x=cam_x, cam_y=cam_y, cam_z=cam_z, yaw=yaw)
+            self.apply_config(cam_id, config)
+            return True
+        except (ValueError, TypeError, cv2.error, np.linalg.LinAlgError):
+            return False
+
+    @staticmethod
+    def prepare_config(src_points, dst_points, matrix=None, metadata=None):
+        source = np.asarray(src_points, dtype=np.float64)
+        destination = np.asarray(dst_points, dtype=np.float64)
+        if source.ndim != 2 or source.shape[1:] != (2,) or source.shape != destination.shape or len(source) < 4:
+            raise ValueError("Cần ít nhất 4 cặp điểm ảnh–mặt sàn.")
+        if not np.isfinite(source).all() or not np.isfinite(destination).all() or (source < 0).any() or (source > 1).any():
+            raise ValueError("Điểm ảnh phải nằm trong 0..1; tọa độ phải hữu hạn.")
+        for points in (source, destination):
+            if np.linalg.matrix_rank(points - points.mean(axis=0), tol=1e-7) < 2:
+                raise ValueError("Các điểm hiệu chuẩn không được thẳng hàng.")
+        transform = cv2.findHomography(source, destination, 0)[0] if matrix is None else np.asarray(matrix, dtype=float)
+        if transform is None or transform.shape != (3, 3) or not np.isfinite(transform).all() or np.linalg.matrix_rank(transform) < 3:
+            raise ValueError("Ma trận hiệu chuẩn không hợp lệ.")
+        transform = transform / np.linalg.norm(transform)
+        denominators = np.column_stack((source, np.ones(len(source)))) @ transform[2]
+        if np.min(np.abs(denominators)) < 1e-8 or np.min(denominators) * np.max(denominators) <= 0:
+            raise ValueError("Phép chiếu có điểm vô cực trong vùng hiệu chuẩn.")
+        corners = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        corner_depth = np.column_stack((corners, np.ones(4))) @ transform[2]
+        fov = cv2.perspectiveTransform(corners[None], transform)[0].tolist() if np.min(np.abs(corner_depth)) > 1e-8 and np.min(corner_depth) * np.max(corner_depth) > 0 else []
+        config = dict(metadata or {})
+        config.update(src_points=source.tolist(), dst_points=destination.tolist(), matrix=transform.tolist(), fov_polygon=fov)
+        return config
+
+    def apply_config(self, cam_id, config):
+        checked = self.prepare_config(config["src_points"], config["dst_points"], config.get("matrix"), config)
+        with self.lock:
+            self.homographies[cam_id] = np.asarray(checked["matrix"], dtype=float)
+            self.configs[cam_id] = checked
+
+
+    def restore_config(self, cam_id, config):
+        try:
+            self.apply_config(cam_id, config)
+            return True
+        except (ValueError, TypeError, cv2.error, np.linalg.LinAlgError):
+            return False
 
     def _compute_homography_dlt(self, src: np.ndarray, dst: np.ndarray) -> Optional[np.ndarray]:
         """Compute 3x3 Homography matrix using SVD."""
@@ -118,40 +130,53 @@ class CameraCalibrator:
             fx = float(floor_pt[0] / floor_pt[2])
             fy = float(floor_pt[1] / floor_pt[2])
         else:
-            fx, fy = (MIN_X + MAX_X) / 2.0, (MIN_Z + MAX_Z) / 2.0
+            return (None, None)
             
         # A calibrated map can use any metric origin/extent; do not clamp it to
         # the legacy warehouse constants used only by the uncalibrated fallback.
         return (round(fx, 3), round(fy, 3))
 
     def project_ground_point(self, cam_id: str, x: float, y: float) -> dict:
-        if cam_id not in self.homographies:
-            return {
+        with self.lock:
+            config = self.configs.get(cam_id)
+            matrix = self.homographies.get(cam_id)
+        invalid = {
                 "x": None,
                 "y": None,
                 "z": None,
                 "valid": False,
                 "source": "uncalibrated",
                 "confidence": 0.0,
-            }
-        floor_x, floor_y = self.camera_to_floor(cam_id, x, y)
-        calibrated = cam_id in self.homographies and floor_x is not None and floor_y is not None
+        }
+        if matrix is None or not np.isfinite([x, y]).all():
+            return invalid
+        projected = matrix @ np.array([x, y, 1.0])
+        if not np.isfinite(projected).all() or abs(projected[2]) < 1e-8:
+            return dict(invalid, source="invalid_projection")
+        floor_x, floor_y = projected[:2] / projected[2]
+        coverage = (config or {}).get("coverage_polygon")
+        inside = not coverage or cv2.pointPolygonTest(np.asarray(coverage, dtype=np.float32), (float(x), float(y)), False) >= 0
         return {
-            "x": floor_x,
+            "x": round(float(floor_x), 4),
             "y": 0.0,
-            "z": floor_y,
-            "valid": calibrated,
-            "source": "homography" if calibrated else "uncalibrated",
-            "confidence": 1.0 if calibrated else 0.0,
+            "z": round(float(floor_y), 4),
+            "valid": True,
+            "source": (config or {}).get("method", "homography"),
+            "confidence": 0.9 if inside else 0.35,
+            "inside_calibrated_area": inside,
+            "coordinate_space": "fms_floor_metric",
         }
 
     def get_config(self, cam_id: str) -> Optional[dict]:
-        return self.configs.get(cam_id)
+        with self.lock:
+            return copy.deepcopy(self.configs.get(cam_id))
 
     def load_from_db_records(self, records: List[dict]):
         for r in records:
             cam_id = r.get("cam_id") or r.get("id")
             calib = r.get("calibration_points") or {}
+            if isinstance(calib, str):
+                calib = json.loads(calib)
             src = r.get("src_points") or calib.get("src_points")
             dst = r.get("dst_points") or calib.get("dst_points")
             cam_x = r.get("cam_x")
@@ -159,7 +184,11 @@ class CameraCalibrator:
             cam_z = r.get("cam_z")
             yaw = r.get("yaw")
             if cam_id and src and dst:
-                self.set_calibration(cam_id, src, dst, cam_x, cam_y, cam_z, yaw)
+                matrix = r.get("homography_matrix") or calib.get("matrix")
+                if isinstance(matrix, str):
+                    matrix = json.loads(matrix)
+                self.restore_config(cam_id, dict(calib, src_points=src, dst_points=dst,
+                    matrix=matrix, cam_x=cam_x, cam_y=cam_y, cam_z=cam_z, yaw=yaw))
 
 # Global singleton
 camera_calibrator = CameraCalibrator()
