@@ -25,6 +25,7 @@ from core.database import db_manager
 from core.identity_utils import identity_global_id, robot_number_from_label
 from core.deepstream_pose import frame_poses, attach_poses
 from core.person_analytics import person_ground_point
+from core.temporal_stabilizer import TemporalDetectionStabilizer
 try:
     from src.perception.probes import extract_reid_from_user_meta
 except Exception:
@@ -102,6 +103,7 @@ class DeepStreamManager:
         self.sources: Dict[int, dict] = {}
         self.cam_id_to_source_id: Dict[str, int] = {}
         self.source_id_to_cam_id: Dict[int, str] = {}
+        self._temporal_stabilizers: Dict[str, TemporalDetectionStabilizer] = {}
         self.next_source_id = 0
         self.lock = threading.RLock()
         self.is_running = False
@@ -653,6 +655,10 @@ class DeepStreamManager:
                 # Debug heartbeat every ~5 seconds (approx every 150 frames at 30fps)
                 poses = frame_poses(frame_meta, frame_w, frame_h)
                 attach_poses(raw_detections, poses)
+                if cam_id not in self._temporal_stabilizers:
+                    self._temporal_stabilizers[cam_id] = TemporalDetectionStabilizer()
+                stabilizer = self._temporal_stabilizers[cam_id]
+                raw_detections = stabilizer.update(raw_detections, now=timestamp_ms / 1000.0)
                 if not hasattr(self, "_pose_counts"):
                     self._pose_counts = {}
                 self._pose_counts[cam_id] = sum(bool(item.get("keypoints")) for item in raw_detections)
@@ -706,7 +712,7 @@ class DeepStreamManager:
                         fy = d.get("floor_y")
                         fx = float(fx) if fx is not None else 0.0
                         fy = float(fy) if fy is not None else 0.0
-                        ground, ground_source = person_ground_point(d["bbox"], d.get("keypoints"))
+                        ground, ground_source = person_ground_point(d["bbox"], d.get("keypoints_raw", d.get("keypoints")))
                         spatial = camera_calibrator.project_ground_point(cam_id, *ground)
                         if spatial["valid"]:
                             fx, fy = spatial["x"], spatial["z"]
@@ -777,6 +783,7 @@ class DeepStreamManager:
                         objects_list.append({
                             "id": gid,
                             "local_id": d["local_id"],
+                            "source_local_id": d.get("source_local_id"),
                             "class": obj_class_name,
                             "category": category,
                             "x": round(d["bbox"][0], 4),
@@ -798,6 +805,11 @@ class DeepStreamManager:
                             "spatial_source": spatial["source"],
                             "spatial_confidence": spatial["confidence"],
                             "keypoints": d.get("keypoints") or [],
+                            "keypoints_raw": d.get("keypoints_raw") or [],
+                            "keypoints_stale": d.get("keypoints_stale", False),
+                            "keypoints_age": d.get("keypoints_age", 0),
+                            "keypoints_predicted_indices": d.get("keypoints_predicted_indices", []),
+                            "pose_tracking_state": d.get("pose_tracking_state", "unavailable"),
                             "pose_source": d.get("pose_source"),
                             "tracking_state": d.get("tracking_state", "predicted"),
                             "frame_width": d.get("frame_width"),

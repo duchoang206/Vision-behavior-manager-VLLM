@@ -3,8 +3,8 @@ gie-unique-id=1
 gpu-id=0
 net-scale-factor=0.0039215697906911373
 model-color-format=0
-onnx-file=/app/models/yolov8x-pose.onnx
-model-engine-file=/app/models/yolov8x-pose_b2_gpu0_fp16.engine
+onnx-file=/app/models/yolo11l-pose.onnx
+model-engine-file=/app/models/yolo11l-pose_b2_gpu0_fp16.engine
 infer-dims=3;640;640
 num-detected-classes=1
 labelfile-path=/app/models_config/labels.txt
@@ -23,8 +23,8 @@ symmetric-padding=1
 
 [class-attrs-all]
 nms-iou-threshold=0.45
-pre-cluster-threshold=0.35
+pre-cluster-threshold=0.48
 topk=300
 
 [class-attrs-0]
-pre-cluster-threshold=0.35
+pre-cluster-threshold=0.48

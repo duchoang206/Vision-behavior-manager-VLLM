@@ -84,11 +84,11 @@ class DigitalTwinBridge:
         
         # 2. Re-ID matching against Registered Fleet (e.g. Robot_9001)
         matched_label = None
-        if reid_vector and len(reid_vector) == 512:
+        identity_label = (object_data or {}).get("label") or (raw_class if raw_class.startswith(("Robot_", "Rack_", "Person_")) else None)
+        if not identity_label and reid_vector and len(reid_vector) == 512:
             matched_label, score = target_registry.match_reid(reid_vector, threshold=0.65)
             
         cls_lower = raw_class.lower()
-        identity_label = raw_class if raw_class.startswith(("Robot_", "Rack_", "Person_")) else None
         
         # 3. Categorize entity
         if 'person' in cls_lower or 'human' in cls_lower or 'worker' in cls_lower:

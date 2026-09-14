@@ -14,7 +14,7 @@ import cv2
 from typing import Dict, List, Set, Optional, Tuple, Any
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.database import db_manager
 from utils.circular_logger import app_logger
@@ -27,9 +27,11 @@ from core.person_tracker import person_tracker_manager
 from core.template_identity_tracker import template_identity_tracker_manager
 from core.identity_utils import identity_global_id, robot_number_from_label
 from core.metadata_fusion import MetadataFusion
+from core.mediamtx_client import mediamtx_client
 from core.registered_target_mask import decode_frame, validate_mask, registered_target_mask_segmenter
+from core.online_calibration import OnlineRobotCalibration
 
-metadata_fusion = MetadataFusion()
+metadata_fusion = MetadataFusion(ttl=1.0, template_ttl=3.5)
 
 
 app = FastAPI(title="RTC VMS (R-SkyView) - Real-time Decoupled Multi-Camera Analytics", version="3.0")
@@ -54,11 +56,46 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Internal Server Error: {str(exc)}"}
     )
 
-MEDIAMTX_API = os.getenv("MEDIAMTX_API", "http://127.0.0.1:9997/v3/config/paths")
 ENABLE_CPU_TRACKER_FALLBACK = os.getenv("ENABLE_CPU_TRACKER_FALLBACK", "1").lower() not in {"0", "false", "no"}
 
 # In-memory registry of active cameras
 cameras: Dict[str, dict] = {}
+
+def _persist_online_calibration(cam_id, config):
+    if cam_id not in cameras:
+        raise RuntimeError("Camera không còn tồn tại.")
+    saved = db_manager.save_calibration(
+        cam_id,
+        config["src_points"],
+        config["dst_points"],
+        config["matrix"],
+        config.get("cam_x"),
+        config.get("cam_y"),
+        config.get("cam_z"),
+        config.get("yaw"),
+        config.get("fov_polygon"),
+        config=config,
+    )
+    if not saved:
+        raise RuntimeError("Không lưu được hiệu chuẩn; giữ nguyên ma trận đang dùng.")
+    if cam_id in cameras:
+        cameras[cam_id]["calibration"] = config
+        cameras[cam_id]["fov_polygon"] = config.get("fov_polygon")
+
+online_robot_calibration = OnlineRobotCalibration(
+    camera_calibrator,
+    fms_bridge,
+    persist=_persist_online_calibration,
+)
+calibration_task = None
+
+async def _online_calibration_loop():
+    while True:
+        try:
+            await asyncio.to_thread(online_robot_calibration.fit_pending)
+        except Exception:
+            logging.exception("Online calibration fitting failed")
+        await asyncio.sleep(1.0)
 
 
 def _is_person_object(obj: dict) -> bool:
@@ -73,17 +110,12 @@ def _start_cpu_tracker_fallback(cam_id: str, rtsp_url: str):
     except Exception as e:
         print(f"[PersonTracker] Could not start fallback for {cam_id}: {e}", flush=True)
 
-def _start_template_identity_tracker(cam_id: str, rtsp_url: str):
-    try:
-        template_identity_tracker_manager.add_camera(cam_id, sanitize_rtsp_url(rtsp_url))
-    except Exception as e:
-        print(f"[IdentityTemplate] Could not start tracker for {cam_id}: {e}", flush=True)
-
 def _restore_template_targets_for_camera(cam_id: str, rtsp_url: str):
     try:
         from src.controller.registry import target_registry
         for target in target_registry.get_all_targets(cam_id=cam_id):
             samples = target_registry.get_template_samples(target["label"], cam_id)
+            target_vectors = target_registry.get_target_vectors(target["label"], cam_id)
             for sample in samples:
                 template_identity_tracker_manager.add_target(
                     cam_id,
@@ -94,6 +126,7 @@ def _restore_template_targets_for_camera(cam_id: str, rtsp_url: str):
                     crop_image=sample.get("crop_image"),
                     mask=sample.get("mask"),
                     frame_image=sample.get("frame_image"),
+                    reid_vectors=sample.get("reid_vectors") or target_vectors,
                 )
     except Exception as e:
         print(f"[IdentityTemplate] Could not restore targets for {cam_id}: {e}", flush=True)
@@ -306,6 +339,11 @@ class CalibrationRequest(BaseModel):
     cam_z: Optional[float] = None
     yaw: Optional[float] = None
 
+class AutoCalibrationStartRequest(BaseModel):
+    auto_apply: bool = False
+    time_offset_ms: float = Field(default=0, ge=-2000, le=2000, allow_inf_nan=False)
+    reset: bool = False
+
 class RuleItem(BaseModel):
     id: str
     type: str # intrusion, tripwire, dwell_time, density, occupancy
@@ -467,24 +505,32 @@ def broadcast_metadata_sync(payload: dict):
             if cam_id and isinstance(objects, list):
                 cam_key = str(cam_id)
                 incoming = [dict(obj) for obj in objects if isinstance(obj, dict)]
+                registered_robots = {}
+                if payload.get("source") == "identity_template" and online_robot_calibration.sessions.get(cam_key, {}).get("running"):
+                    try:
+                        from src.controller.registry import target_registry
+                        for target in target_registry.get_all_targets(cam_id=cam_key):
+                            if (target.get("category") or "").lower() != "robot":
+                                continue
+                            robot_id = target.get("fms_robot_id") or robot_number_from_label(target.get("label", ""))
+                            if robot_id is not None:
+                                registered_robots[str(target.get("label", "")).casefold()] = robot_id
+                    except Exception:
+                        registered_robots = {}
                 for obj in incoming:
-                    category = (obj.get("category") or obj.get("class") or "object").lower()
-                    obj.setdefault("category", category)
-                    if "world_position" not in obj:
-                        try:
-                            bbox = [obj.get("x", 0.0), obj.get("y", 0.0), obj.get("w", 0.0), obj.get("h", 0.0)]
-                            spatial = camera_calibrator.project_ground_point(
-                                cam_key, bbox[0] + bbox[2] / 2.0, bbox[1] + bbox[3]
-                            )
-                            obj["floor_x"] = spatial["x"]
-                            obj["floor_y"] = spatial["z"]
-                            obj["world_position"] = [spatial["x"], spatial["y"], spatial["z"]]
-                            obj["spatial_valid"] = spatial["valid"]
-                            obj["spatial_source"] = spatial["source"]
-                            obj["spatial_confidence"] = spatial["confidence"]
-                        except Exception:
-                            pass
+                    obj.setdefault("category", (obj.get("class") or "object").lower())
+                    obj.setdefault("observed_at", payload.get("timestamp", int(now * 1000)))
+                if registered_robots:
+                    online_robot_calibration.observe(cam_key, incoming, registered_robots, now=now)
                 merged = metadata_fusion.update(cam_key, payload.get("source", "deepstream"), incoming)
+                for obj in merged:
+                    ground = obj.get("ground_point") or [obj.get("x", 0) + obj.get("w", 0) / 2, obj.get("y", 0) + obj.get("h", 0)]
+                    spatial = camera_calibrator.project_ground_point(cam_key, *ground)
+                    obj.update(floor_x=spatial["x"], floor_y=spatial["z"],
+                        world_position=[spatial["x"], spatial["y"], spatial["z"]], spatial_valid=spatial["valid"],
+                        spatial_source=spatial["source"], spatial_confidence=spatial["confidence"],
+                        inside_calibrated_area=spatial.get("inside_calibrated_area", False),
+                        fms_world_position=fms_bridge.floor_to_fms(spatial["x"], spatial["z"]) if spatial["valid"] else None)
                 latest_objects_by_cam[cam_key] = merged
                 st["objects"] = merged
                 latest_metadata_at_by_cam[str(cam_id)] = now
@@ -566,8 +612,9 @@ async def _broadcast_to_set(target_set: Set[WebSocket], msg: str):
 
 @app.on_event("startup")
 async def startup_event():
-    global loop
+    global loop, calibration_task
     loop = asyncio.get_running_loop()
+    calibration_task = asyncio.create_task(_online_calibration_loop())
 
     # Start FMS Realtime Bridge
     try:
@@ -610,13 +657,7 @@ async def startup_event():
         cameras[cam_id] = cam
 
         try:
-            res = requests.post(f"{MEDIAMTX_API}/add/{cam_id}", json={
-                "source": cam["rtsp_url"],
-                "sourceOnDemand": False,
-                "rtspTransport": "tcp"
-            }, timeout=2)
-            if res.status_code not in (200, 201):
-                requests.post(f"{MEDIAMTX_API}/patch/{cam_id}", json={"source": cam["rtsp_url"]}, timeout=2)
+            await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, cam["rtsp_url"])
         except Exception as e:
             print(f"[MediaMTX] Startup proxy path registration failed for {cam_id}: {e}")
 
@@ -628,15 +669,12 @@ async def startup_event():
 
         calib_pts = c.get("calibration")
         if calib_pts and isinstance(calib_pts, dict):
-            camera_calibrator.set_calibration(
-                cam_id,
-                calib_pts.get("src_points", []),
-                calib_pts.get("dst_points", []),
-                c.get("cam_x"),
-                c.get("cam_y"),
-                c.get("cam_z"),
-                c.get("yaw")
-            )
+            camera_calibrator.restore_config(cam_id, dict(calib_pts, cam_x=c.get("cam_x"),
+                cam_y=c.get("cam_y"), cam_z=c.get("cam_z"), yaw=c.get("yaw")))
+            online_settings = calib_pts.get("online") or {}
+            if online_settings.get("enabled"):
+                online_robot_calibration.start(cam_id, auto_apply=online_settings.get("auto_apply", False),
+                                               time_offset_ms=online_settings.get("time_offset_ms", 0))
 
         db_manager.delete_invalid_occupancy_rules(cam_id)
         rules = db_manager.get_rules_by_camera(cam_id)
@@ -659,7 +697,7 @@ async def startup_event():
             print(f"[Main] Camera {cam_id} reachable - will add to pipeline.", flush=True)
             _start_cpu_tracker_fallback(cam_id, rtsp_url)
             # add_target starts the camera tracker only when trusted label crops exist.
-            _restore_template_targets_for_camera(cam_id, rtsp_url)
+            await asyncio.to_thread(_restore_template_targets_for_camera, cam_id, rtsp_url)
         else:
             c["status"] = "offline"
             offline_cameras.append((cam_id, rtsp_url))
@@ -675,6 +713,12 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if calibration_task:
+        calibration_task.cancel()
+        try:
+            await calibration_task
+        except asyncio.CancelledError:
+            pass
     try:
         await fms_bridge.stop()
     except Exception as e:
@@ -688,10 +732,11 @@ async def _retry_offline_cameras(offline_list: list, interval: int = 30):
         await asyncio.sleep(interval)
         still_offline = []
         for cam_id, rtsp_url in remaining:
-            if cam_id not in cameras:
+            if cam_id not in cameras or cameras[cam_id]["rtsp_url"] != rtsp_url:
                 continue
 
             try:
+                await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, rtsp_url)
                 from check_rtsp import is_rtsp_valid_async
                 is_reachable = await is_rtsp_valid_async(rtsp_url, timeout=5)
             except Exception:
@@ -702,8 +747,7 @@ async def _retry_offline_cameras(offline_list: list, interval: int = 30):
                 print(f"[Main] Camera {cam_id} is now reachable - adding to pipeline.", flush=True)
                 deepstream_manager.add_source(cam_id, rtsp_url)
                 _start_cpu_tracker_fallback(cam_id, rtsp_url)
-                _start_template_identity_tracker(cam_id, rtsp_url)
-                _restore_template_targets_for_camera(cam_id, rtsp_url)
+                await asyncio.to_thread(_restore_template_targets_for_camera, cam_id, rtsp_url)
             else:
                 cameras[cam_id]["status"] = "offline"
                 still_offline.append((cam_id, rtsp_url))
@@ -767,13 +811,7 @@ async def add_camera(request: CameraAddRequest):
     
     # 3. Register Camera Stream in MediaMTX for direct WebRTC/WHEP streaming (background / fast)
     try:
-        res = requests.post(f"{MEDIAMTX_API}/add/{cam_id}", json={
-            "source": clean_url,
-            "sourceOnDemand": False,
-            "rtspTransport": "tcp"
-        }, timeout=1.5)
-        if res.status_code not in (200, 201):
-            requests.post(f"{MEDIAMTX_API}/patch/{cam_id}", json={"source": clean_url}, timeout=1.0)
+        await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, clean_url)
     except Exception as e:
         print(f"[MediaMTX] Note: proxy path registration: {e}")
 
@@ -781,7 +819,7 @@ async def add_camera(request: CameraAddRequest):
     if is_valid:
         deepstream_manager.add_source(cam_id, clean_url)
         _start_cpu_tracker_fallback(cam_id, clean_url)
-        _start_template_identity_tracker(cam_id, clean_url)
+        await asyncio.to_thread(_restore_template_targets_for_camera, cam_id, clean_url)
     else:
         asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
     
@@ -811,12 +849,12 @@ async def update_camera(cam_id: str, request: CameraUpdateRequest):
         cam["rtsp_url"] = clean_url
         cam["status"] = "offline"
         try:
-            requests.post(f"{MEDIAMTX_API}/patch/{cam_id}", json={"source": clean_url}, timeout=2)
+            await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, clean_url)
         except Exception:
             pass
         deepstream_manager.delete_source(cam_id)
         _stop_cpu_tracker_fallback(cam_id)
-        _stop_template_identity_tracker(cam_id)
+        await asyncio.to_thread(_stop_template_identity_tracker, cam_id)
 
         try:
             from check_rtsp import is_rtsp_valid_async
@@ -828,8 +866,7 @@ async def update_camera(cam_id: str, request: CameraUpdateRequest):
             cam["status"] = "online"
             deepstream_manager.add_source(cam_id, clean_url)
             _start_cpu_tracker_fallback(cam_id, clean_url)
-            _start_template_identity_tracker(cam_id, clean_url)
-            _restore_template_targets_for_camera(cam_id, clean_url)
+            await asyncio.to_thread(_restore_template_targets_for_camera, cam_id, clean_url)
         else:
             asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
 
@@ -847,13 +884,14 @@ async def delete_camera(cam_id: str):
     if cam_id in cameras:
         deepstream_manager.delete_source(cam_id)
         _stop_cpu_tracker_fallback(cam_id)
-        _stop_template_identity_tracker(cam_id)
+        await asyncio.to_thread(_stop_template_identity_tracker, cam_id)
     try:
-        requests.post(f"{MEDIAMTX_API}/delete/{cam_id}", timeout=2)
+        await asyncio.to_thread(mediamtx_client.delete_path, cam_id)
     except Exception:
         pass
 
     db_manager.delete_camera(cam_id)
+    online_robot_calibration.remove_camera(cam_id)
     cameras.pop(cam_id, None)
     return {"status": "success", "deleted_id": cam_id}
 
@@ -915,26 +953,55 @@ async def save_camera_calibration(cam_id: str, calib: CalibrationRequest):
     if cam_id not in cameras:
         raise HTTPException(status_code=404, detail="Camera not found")
         
-    success = camera_calibrator.set_calibration(cam_id, calib.src_points, calib.dst_points, calib.cam_x, calib.cam_y, calib.cam_z, calib.yaw)
-    if not success:
-        raise HTTPException(status_code=400, detail="Không thể tính ma trận biến đổi từ các điểm đã chọn")
-        
-    cfg = camera_calibrator.get_config(cam_id)
-    if cfg:
-        db_manager.save_calibration(cam_id, calib.src_points, calib.dst_points, cfg["matrix"], calib.cam_x, calib.cam_y, calib.cam_z, calib.yaw, cfg.get("fov_polygon"))
-        cameras[cam_id]["calibration"] = cfg
-        cameras[cam_id]["cam_x"] = calib.cam_x
-        cameras[cam_id]["cam_y"] = calib.cam_y
-        cameras[cam_id]["cam_z"] = calib.cam_z
-        cameras[cam_id]["yaw"] = calib.yaw
-        cameras[cam_id]["fov_polygon"] = cfg.get("fov_polygon")
-        
+    try:
+        cfg = camera_calibrator.prepare_config(calib.src_points, calib.dst_points,
+            metadata=dict(cam_x=calib.cam_x, cam_y=calib.cam_y, cam_z=calib.cam_z, yaw=calib.yaw, method="homography"))
+        await asyncio.to_thread(online_robot_calibration.save_manual, cam_id, cfg)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(503, str(error)) from error
     return {"status": "success", "config": cfg}
 
 @app.get("/api/camera/{cam_id}/calibration")
 async def get_camera_calibration(cam_id: str):
     cfg = camera_calibrator.get_config(cam_id)
-    return {"status": "success", "calibration": cfg}
+    return {"status": "success", "calibration": cfg,
+            "fms_frame": {"origin_x": fms_bridge.origin_x, "origin_y": fms_bridge.origin_y, "layout_depth": fms_bridge.layout_depth}}
+
+@app.post("/api/camera/{cam_id}/calibration/auto/start")
+async def start_auto_camera_calibration(cam_id: str, request: AutoCalibrationStartRequest):
+    if cam_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    status = online_robot_calibration.start(
+        cam_id,
+        auto_apply=request.auto_apply,
+        time_offset_ms=request.time_offset_ms,
+        reset=request.reset,
+    )
+    return {"status": "success", "auto_calibration": status}
+
+@app.post("/api/camera/{cam_id}/calibration/auto/stop")
+async def stop_auto_camera_calibration(cam_id: str):
+    if cam_id not in cameras:
+        raise HTTPException(404, "Camera not found")
+    return {"status": "success", "auto_calibration": await asyncio.to_thread(online_robot_calibration.stop, cam_id)}
+
+@app.get("/api/camera/{cam_id}/calibration/auto/status")
+async def get_auto_camera_calibration_status(cam_id: str):
+    if cam_id not in cameras:
+        raise HTTPException(404, "Camera not found")
+    return {"status": "success", "auto_calibration": online_robot_calibration.status(cam_id)}
+
+@app.post("/api/camera/{cam_id}/calibration/auto/apply")
+async def apply_auto_camera_calibration(cam_id: str):
+    if cam_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    try:
+        config = await asyncio.to_thread(online_robot_calibration.apply, cam_id)
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"status": "success", "config": config, "auto_calibration": online_robot_calibration.status(cam_id)}
 
 @app.get("/api/calibration/map-overview")
 async def get_map_overview():
@@ -1101,11 +1168,26 @@ async def register_target_api(req: RegisterTargetRequest):
     return {"status": "success" if success else "failed", "label": label}
 
 @app.post("/api/registry/register-crop")
-async def register_crop_target_api(req: RegisterCropTargetRequest):
+def register_crop_target_api(req: RegisterCropTargetRequest):
     from src.controller.registry import target_registry
     label = _canonical_identity_label(req.label, req.category)
     if not label:
         raise HTTPException(status_code=400, detail="Label không được để trống.")
+    cam_info = cameras.get(req.cam_id)
+    if not cam_info:
+        persisted = next((camera for camera in db_manager.get_all_cameras() if camera["id"] == req.cam_id), None)
+        cam_info = _camera_payload_from_db(persisted, status="offline") if persisted else None
+    if not cam_info:
+        raise HTTPException(status_code=404, detail="Camera không tồn tại.")
+    if req.bbox is not None:
+        try:
+            _validate_mask_bbox(req.bbox)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        mediamtx_client.ensure_path(req.cam_id, cam_info["rtsp_url"])
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Relay camera chưa sẵn sàng. Vui lòng thử đăng ký lại.") from exc
     if req.mask is not None:
         try:
             if req.category not in {"robot", "rack"} or not req.frame_image:
@@ -1147,10 +1229,6 @@ async def register_crop_target_api(req: RegisterCropTargetRequest):
 
     assigned_track = None
     if success:
-        cam_info = cameras.get(req.cam_id)
-        if not cam_info:
-            persisted = next((c for c in db_manager.get_all_cameras() if c["id"] == req.cam_id), None)
-            cam_info = _camera_payload_from_db(persisted, status="offline") if persisted else None
         if cam_info and req.bbox:
             template_identity_tracker_manager.add_target(
                 req.cam_id,
@@ -1161,6 +1239,8 @@ async def register_crop_target_api(req: RegisterCropTargetRequest):
                 crop_image=req.crop_image,
                 mask=req.mask,
                 frame_image=req.frame_image if req.mask is not None else None,
+                reid_vector=vector,
+                reid_vectors=[vector] if vector else None,
             )
 
         if live_obj:
@@ -1209,7 +1289,7 @@ async def get_registered_targets_api(cam_id: Optional[str] = None):
     return {"status": "success", "targets": targets}
 
 @app.delete("/api/registry/target/{label}")
-async def delete_registered_target_api(label: str, cam_id: Optional[str] = None):
+def delete_registered_target_api(label: str, cam_id: Optional[str] = None):
     from src.controller.registry import target_registry
     success = target_registry.remove_target(label, cam_id=cam_id)
     template_identity_tracker_manager.remove_target(label, cam_id=cam_id)
@@ -1217,7 +1297,7 @@ async def delete_registered_target_api(label: str, cam_id: Optional[str] = None)
 
 @app.delete("/api/camera/{cam_id}/registry/target/{label}")
 @app.delete("/api/registry/target/{label}/camera/{cam_id}")
-async def delete_registered_target_camera_sample_api(cam_id: str, label: str):
+def delete_registered_target_camera_sample_api(cam_id: str, label: str):
     from src.controller.registry import target_registry
     success = target_registry.remove_target(label, cam_id=cam_id)
     template_identity_tracker_manager.remove_target(label, cam_id=cam_id)

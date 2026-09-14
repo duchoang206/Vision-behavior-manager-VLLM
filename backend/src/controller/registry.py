@@ -11,7 +11,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
-from core.identity_utils import robot_number_from_label
+from core.identity_utils import identity_global_id, robot_number_from_label
 from core.registered_target_mask import validate_mask
 
 
@@ -194,15 +194,27 @@ class TargetRegistry:
             return None
         sample = (target.get("samples_by_cam") or {}).get(cam_id)
         if sample:
-            return sample
+            res = dict(sample)
+            res["reid_vector"] = target.get("vector")
+            res["reid_vectors"] = target.get("vectors") or ([target.get("vector")] if target.get("vector") is not None else [])
+            return res
         if (target.get("cam_id") == cam_id or target.get("last_cam") == cam_id) and target.get("bbox"):
             return {
                 "cam_id": cam_id,
                 "bbox": target.get("bbox"),
                 "crop_image": target.get("crop_image"),
                 "category": target.get("category", "object"),
+                "reid_vector": target.get("vector"),
+                "reid_vectors": target.get("vectors") or ([target.get("vector")] if target.get("vector") is not None else []),
             }
         return None
+
+    def get_target_vectors(self, label: str, cam_id: Optional[str] = None) -> List[List[float]]:
+        target = self._find_target_data(label, cam_id)
+        if not target:
+            return []
+        vectors = target.get("vectors") or ([target.get("vector")] if target.get("vector") is not None else [])
+        return [np.asarray(v, dtype=np.float32).tolist() for v in vectors if v is not None and len(v) == 512]
 
     def get_template_samples(self, label: str, cam_id: str) -> List[Dict[str, Any]]:
         """Return every trusted crop collected for one label on one camera."""
@@ -220,6 +232,9 @@ class TargetRegistry:
         if not target:
             return []
 
+        target_vectors = target.get("vectors") or ([target.get("vector")] if target.get("vector") is not None else [])
+        clean_vectors = [np.asarray(v, dtype=np.float32).tolist() for v in target_vectors if v is not None and len(v) == 512]
+
         samples = []
         for crop in target.get("crops") or []:
             if crop.get("crop_image") and self._normalize_bbox(crop.get("bbox")):
@@ -230,6 +245,8 @@ class TargetRegistry:
                     "mask": crop.get("mask"),
                     "frame_image": crop.get("frame_image"),
                     "category": target.get("category", "object"),
+                    "reid_vector": target.get("vector"),
+                    "reid_vectors": clean_vectors,
                     "created_at": crop.get("created_at", 0),
                 })
 
@@ -242,6 +259,8 @@ class TargetRegistry:
                 "mask": latest.get("mask"),
                 "frame_image": latest.get("frame_image"),
                 "category": latest.get("category") or target.get("category", "object"),
+                "reid_vector": target.get("vector"),
+                "reid_vectors": clean_vectors,
                 "created_at": latest.get("updated_at", 0),
             }
             if not any(s["crop_image"] == latest_sample["crop_image"] for s in samples):
@@ -602,7 +621,7 @@ class TargetRegistry:
                     self.local_track_labels.pop((cam_id, int(local_id)), None)
                 else:
                     cur_sim = reid_scores.get(existing, 0.0)
-                    if cur_sim >= 0.65:
+                    if feature is None or cur_sim >= 0.65:
                         self._remember_assignment(existing, cam_id, global_id, local_id, live_bbox=det_bbox)
                         return existing
                     else:
@@ -618,7 +637,7 @@ class TargetRegistry:
                     self.global_track_labels.pop(int(global_id), None)
                 else:
                     cur_sim = reid_scores.get(existing_g, 0.0)
-                    if cur_sim >= 0.65:
+                    if feature is None or cur_sim >= 0.65:
                         self._remember_assignment(existing_g, cam_id, global_id, local_id, live_bbox=det_bbox)
                         return existing_g
                     else:
@@ -705,6 +724,7 @@ class TargetRegistry:
             result.append({
                 "key": key,
                 "label": label,
+                "global_id": identity_global_id(label, category),
                 "cam_id": t_cam,
                 "created_at": data["created_at"],
                 "last_seen": data["last_seen"],
