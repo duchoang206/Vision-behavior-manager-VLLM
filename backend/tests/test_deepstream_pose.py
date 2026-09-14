@@ -28,6 +28,28 @@ class DeepStreamPoseTests(unittest.TestCase):
         self.assertEqual([17, 0], [len(item["keypoints"]) for item in detections])
         self.assertEqual("predicted", detections[1]["tracking_state"])
 
+    def test_pose_attaches_when_bbox_jitters(self):
+        poses = decode_pose_tensor(self.tensor(), 1280, 720)
+        detections = [{"bbox": [0.47, 0.31, 0.2, 0.5]}]
+        attach_poses(detections, poses)
+        self.assertEqual(17, len(detections[0]["keypoints"]))
+
+    def test_pose_does_not_attach_to_adjacent_nonoverlapping_person(self):
+        poses = decode_pose_tensor(self.tensor(), 1280, 720)
+        detections = [{"bbox": [.605, .25, .2, .5]}]
+        attach_poses(detections, poses)
+        self.assertEqual([], detections[0]["keypoints"])
+
+    def test_pose_assignment_is_one_to_one_when_people_are_close(self):
+        poses = [
+            {"bbox": [.40, .25, .20, .50], "confidence": .9, "keypoints": [[.5, .5, .9]] * 17},
+            {"bbox": [.43, .25, .20, .50], "confidence": .8, "keypoints": [[.6, .5, .8]] * 17},
+        ]
+        detections = [{"bbox": [.40, .25, .20, .50]}, {"bbox": [.43, .25, .20, .50]}]
+        attach_poses(detections, poses)
+        self.assertEqual([17, 17], [len(item["keypoints"]) for item in detections])
+        self.assertEqual([.5, .6], [item["keypoints"][0][0] for item in detections])
+
     def test_invalid_output_rejected_and_no_pose_is_not_fabricated(self):
         with self.assertRaises(ValueError):
             decode_pose_tensor(np.zeros((84, 2)), 1280, 720)

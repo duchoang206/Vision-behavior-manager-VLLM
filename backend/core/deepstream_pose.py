@@ -2,6 +2,7 @@ import ctypes
 
 import cv2
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 
 def decode_pose_tensor(values, frame_width, frame_height, network_width=640, network_height=640, threshold=0.35):
@@ -67,21 +68,42 @@ def frame_poses(frame_meta, frame_width, frame_height):
 
 
 def attach_poses(detections, poses):
-    pairs = []
+    if not detections:
+        return
+    scores = np.full((len(detections), len(poses)), -1.0, dtype=np.float32)
     for detection_index, detection in enumerate(detections):
         left, top, width, height = detection["bbox"]
         for pose_index, pose in enumerate(poses):
             pose_left, pose_top, pose_width, pose_height = pose["bbox"]
             overlap = max(0, min(left + width, pose_left + pose_width) - max(left, pose_left)) * max(0, min(top + height, pose_top + pose_height) - max(top, pose_top))
             union = width * height + pose_width * pose_height - overlap
-            score = overlap / union if union > 0 else 0
-            if score >= 0.2:
-                pairs.append((score, detection_index, pose_index))
+            iou = overlap / union if union > 0 else 0.0
+            detection_center = np.array([left + width / 2.0, top + height / 2.0])
+            pose_center = np.array([pose_left + pose_width / 2.0, pose_top + pose_height / 2.0])
+            scale = max(0.03, min(width, height, pose_width, pose_height))
+            center_distance = float(np.linalg.norm(detection_center - pose_center) / scale)
+            proximity = max(0.0, 1.0 - center_distance / 1.35)
+            score = 0.72 * iou + 0.28 * proximity
+            size_ratios = np.asarray([width, height]) / np.maximum([pose_width, pose_height], 1e-6)
+            compatible_size = bool(((size_ratios >= 0.45) & (size_ratios <= 2.2)).all())
+            if iou >= 0.2 or (iou >= 0.12 and compatible_size and center_distance <= 0.6):
+                scores[detection_index, pose_index] = score
         detection["keypoints"] = []
         detection["tracking_state"] = "predicted"
     assigned_detections, assigned_poses = set(), set()
-    for score, detection_index, pose_index in sorted(pairs, reverse=True):
-        if detection_index in assigned_detections or pose_index in assigned_poses:
+    if scores.size == 0:
+        return
+    rows, columns = linear_sum_assignment(-scores)
+    for detection_index, pose_index in zip(rows, columns):
+        score = float(scores[detection_index, pose_index])
+        if score < 0:
+            continue
+        row_alternatives = np.delete(scores[detection_index], pose_index)
+        column_alternatives = np.delete(scores[:, pose_index], detection_index)
+        row_best = float(row_alternatives.max()) if row_alternatives.size else -1.0
+        column_best = float(column_alternatives.max()) if column_alternatives.size else -1.0
+        if ((row_best >= 0 and score - row_best < 0.08)
+                or (column_best >= 0 and score - column_best < 0.08)):
             continue
         detections[detection_index].update(
             keypoints=poses[pose_index]["keypoints"],
