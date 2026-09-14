@@ -15,6 +15,7 @@ venv/
 *.engine
 *.onnx
 *.mp4
+!web-dashboard/public/login-assets/studio-loop.mp4
 *.avi
 
 # Logs
@@ -36,6 +37,7 @@ Thumbs.db
 
 # Docker
 *.dockerignore
+!web-dashboard/.dockerignore
 
 # Reference and temporary tool folders
 deepstream_reference_apps/
@@ -43,3 +45,8 @@ reference_apps/
 tools/
 backend/.model-tools/
 web-dashboard/.next.stale-*/
+backend/data/workflows.json
+
+recordings/
+backend/runs/
+runs/
