@@ -87,10 +87,10 @@ class RegisteredTargetMaskTests(unittest.TestCase):
         decoded_at = time.time()
 
         @contextmanager
-        def frame_slot():
+        def frame_slot(cam_id, interval):
             reserved.append(True)
             try:
-                yield
+                yield True
             finally:
                 reserved.pop()
 
@@ -106,9 +106,10 @@ class RegisteredTargetMaskTests(unittest.TestCase):
 
         reader = mock.Mock()
         reader.get_latest_frame_packet.side_effect = read_packet
+        tracker.targets = {'Robot_2001': {'label': 'Robot_2001', 'category': 'robot'}}
         with mock.patch('core.template_identity_tracker.registered_target_mask_segmenter') as segmenter, \
                 mock.patch.object(tracker, '_process_registered_frame', side_effect=process_frame) as process:
-            segmenter.frame_slot.side_effect = frame_slot
+            segmenter.try_frame_slot.side_effect = frame_slot
             tracker._process_frames(reader)
         self.assertEqual(1, process.call_count)
         self.assertEqual(1, tracker.processed_frames)
@@ -160,6 +161,7 @@ class RegisteredTargetMaskTests(unittest.TestCase):
             self.assertEqual(mask['polygons'], objects[0]['mask']['polygons'])
             template_match.assert_not_called()
             segmenter.track.return_value = {}
+            tracker.mask_hold_sec = 0
             self.assertEqual([], tracker._process_registered_frame(frame))
             self.assertIsNone(tracker.targets['Robot_2001']['mask'])
             segmenter.track.return_value = observed

@@ -2,6 +2,7 @@
 
 import atexit
 import base64
+import math
 import multiprocessing
 import os
 import threading
@@ -15,6 +16,13 @@ import numpy as np
 
 def eligible_target(target):
     return bool(str(target.get("label") or "").strip()) and target.get("category") in {"robot", "rack"}
+
+
+def sam2_presence_confidence(score):
+    scaled_logit = float(score)
+    if not math.isfinite(scaled_logit) or scaled_logit <= 0:
+        return 0.0
+    return 1.0 / (1.0 + math.exp(-min(32.0, scaled_logit * 32.0)))
 
 
 def validate_mask(mask):
@@ -47,7 +55,9 @@ def mask_bitmap(mask, shape):
 def mask_payload(binary, source="sam2", confidence=1.0):
     binary = np.asarray(binary, dtype=np.uint8)
     height, width = binary.shape
-    contours, hierarchy = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    find_result = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    # OpenCV 4.x returns (contours, hierarchy); OpenCV 3.x returned (image, contours, hierarchy)
+    contours, hierarchy = find_result[-2], find_result[-1]
     if hierarchy is None:
         return None
     rings = []
@@ -96,6 +106,45 @@ class MaskRuntime:
         self.preview.setup_model(verbose=False)
         self.cameras = {}
         self.shared_features = os.getenv("REGISTERED_MASK_SHARED_FEATURES", "1").lower() not in {"0", "false", "no"}
+        self.smoothing_alpha = float(os.getenv("REGISTERED_MASK_SMOOTHING_ALPHA", "0.72"))
+
+    @staticmethod
+    def _bbox_iou(first, second):
+        if not first or not second:
+            return 0.0
+        fx, fy, fw, fh = first
+        sx, sy, sw, sh = second
+        ix1, iy1 = max(fx, sx), max(fy, sy)
+        ix2, iy2 = min(fx + fw, sx + sw), min(fy + fh, sy + sh)
+        intersection = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+        union = fw * fh + sw * sh - intersection
+        return intersection / union if union > 1e-8 else 0.0
+
+    def _smooth_mask(self, entry, binary, bbox):
+        binary = (np.asarray(binary, dtype=np.uint8) > 0).astype(np.uint8)
+        height, width = binary.shape
+        left, top = max(0, int(bbox[0] * width)), max(0, int(bbox[1] * height))
+        right = min(width, int(np.ceil((bbox[0] + bbox[2]) * width)))
+        bottom = min(height, int(np.ceil((bbox[1] + bbox[3]) * height)))
+        if right <= left or bottom <= top:
+            return binary
+        crop = binary[top:bottom, left:right]
+        reduced = cv2.resize(crop, (160, 160), interpolation=cv2.INTER_NEAREST)
+        distance = cv2.distanceTransform(reduced, cv2.DIST_L2, 3) - cv2.distanceTransform(1 - reduced, cv2.DIST_L2, 3)
+        previous = entry.get("shape_distance")
+        if previous is not None and time.monotonic() - entry.get("last_mask_at", 0) <= 0.5:
+            intersection = np.logical_and(previous > 0, reduced > 0).sum()
+            union = np.logical_or(previous > 0, reduced > 0).sum()
+            if intersection / max(1, union) > 0.6:
+                alpha = min(1.0, max(0.7, getattr(self, "smoothing_alpha", 0.72)))
+                filtered = alpha * distance + (1 - alpha) * previous
+                boundary = np.abs(distance) <= 1.5
+                distance[boundary] = filtered[boundary]
+                binary[top:bottom, left:right] = (cv2.resize(distance, (right - left, bottom - top), interpolation=cv2.INTER_LINEAR) > 0).astype(np.uint8)
+        entry["shape_distance"] = np.clip(distance, -4, 4)
+        entry["last_bbox"] = list(bbox)
+        entry["last_mask_at"] = time.monotonic()
+        return binary
 
     def segment(self, frame, bbox, points=None, point_labels=None):
         self.preview.reset_image()
@@ -121,14 +170,14 @@ class MaskRuntime:
         for target in targets:
             predictor = SAM2DynamicInteractivePredictor(overrides=self.options, max_obj_num=1)
             predictor.setup_model(model=self.preview.model, verbose=False)
-            entry = {"predictor": predictor, "seeded": False}
+            entry = {"predictor": predictor, "seeded": False, "last_binary": None, "last_bbox": None, "last_mask_at": 0.0}
             state["objects"][target["label"]] = entry
             samples = [sample for sample in target.get("samples", []) if sample.get("mask") and sample.get("frame_image")]
             view_limit = min(16, max(1, int(os.getenv("REGISTERED_MASK_MEMORY_VIEWS", "8"))))
             for sample in samples[-view_limit:]:
                 frame = decode_frame(sample["frame_image"])
                 bitmap = mask_bitmap(sample["mask"], frame.shape)
-                predictor(source=frame, masks=bitmap[None], obj_ids=[0], update_memory=True)
+                predictor(source=frame, masks=bitmap[..., None][None], obj_ids=[0], update_memory=True)
                 entry["seeded"] = True
 
     @contextmanager
@@ -180,13 +229,17 @@ class MaskRuntime:
             binary = result.masks.data[0].cpu().numpy()
             if binary.sum() < 32 or binary.mean() > 0.6:
                 continue
+            height, width = frame.shape[:2]
+            left, top, right, bottom = box.xyxy[0].cpu().tolist()
+            measured_bbox = [left / width, top / height, (right - left) / width, (bottom - top) / height]
+            binary = self._smooth_mask(entry, binary, measured_bbox)
             payload = mask_payload(binary, "sam2_memory", float(box.conf.item()))
             if payload is None:
                 continue
-            height, width = frame.shape[:2]
-            left, top, right, bottom = box.xyxy[0].cpu().tolist()
+            payload["presence_confidence"] = sam2_presence_confidence(float(box.conf.item()))
+            payload["score_type"] = "sam2_positive_object_logit_div32"
             observations[label] = {
-                "bbox": [left / width, top / height, (right - left) / width, (bottom - top) / height],
+                "bbox": measured_bbox,
                 "mask": payload,
             }
         return observations
@@ -213,6 +266,8 @@ def _worker(connection, model_path):
                     result = runtime.track(request["cam_id"], request["frame"], request["seeds"])
                 connection.send({"result": result})
             except Exception as exc:
+                import traceback
+                traceback.print_exc()
                 connection.send({"error": str(exc)})
     except (EOFError, BrokenPipeError):
         pass
@@ -226,6 +281,9 @@ class RegisteredTargetMaskSegmenter:
         self.shared_features = os.getenv("REGISTERED_MASK_SHARED_FEATURES", "1").lower() not in {"0", "false", "no"}
         self.model_path = os.getenv("REGISTERED_MASK_MODEL_PATH", str(Path(__file__).resolve().parents[1] / "models/sam2.1_t.pt"))
         self._lock = threading.RLock()
+        self._schedule_lock = threading.Lock()
+        self._waiting_cameras = {}
+        self._last_slot_at = {}
         self._process = None
         self._connection = None
         self._signatures = {}
@@ -239,6 +297,28 @@ class RegisteredTargetMaskSegmenter:
 
     def frame_slot(self):
         return self._lock
+
+    @contextmanager
+    def try_frame_slot(self, cam_id, interval=0.0):
+        now = time.monotonic()
+        acquired = False
+        with self._schedule_lock:
+            self._waiting_cameras = {camera: times for camera, times in self._waiting_cameras.items()
+                                     if now - times[1] < 1.0}
+            if now - self._last_slot_at.get(cam_id, -math.inf) >= interval:
+                first_wait = self._waiting_cameras.get(cam_id, (now, now))[0]
+                self._waiting_cameras[cam_id] = (first_wait, now)
+                next_camera = min(self._waiting_cameras, key=lambda camera: self._waiting_cameras[camera][0])
+                if next_camera == cam_id:
+                    acquired = self._lock.acquire(blocking=False)
+                    if acquired:
+                        self._waiting_cameras.pop(cam_id, None)
+                        self._last_slot_at[cam_id] = now
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                self._lock.release()
 
     def _request(self, **payload):
         if not self.available():
@@ -295,6 +375,9 @@ class RegisteredTargetMaskSegmenter:
                 return {}
 
     def remove_camera(self, cam_id):
+        with self._schedule_lock:
+            self._waiting_cameras.pop(cam_id, None)
+            self._last_slot_at.pop(cam_id, None)
         with self._lock:
             self._signatures.pop(cam_id, None)
             if self._process is not None and self._process.is_alive():
@@ -306,7 +389,8 @@ class RegisteredTargetMaskSegmenter:
     def status(self):
         return {"enabled": self.enabled, "available": self.available(), "model": Path(self.model_path).name,
                 "backend": "sam2_registered_memory", "shared_features": self.shared_features,
-                "last_error": self.last_error, "last_ms": self.last_ms}
+                "last_error": self.last_error, "last_ms": self.last_ms,
+                "scheduled_cameras": len(self._last_slot_at)}
 
     def close(self):
         with self._lock:
