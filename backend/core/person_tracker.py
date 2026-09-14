@@ -13,6 +13,7 @@ from typing import Dict, List, Callable, Optional
 from core.identity_utils import identity_global_id
 from core.camera_calibrator import camera_calibrator
 from core.pose_estimator import pose_estimator
+from core.temporal_stabilizer import TemporalDetectionStabilizer
 
 # Force lowest latency RTSP capture settings in FFmpeg
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0"
@@ -163,6 +164,7 @@ class SimpleTracker:
                 tid = self.next_id
                 self.next_id += 1
                 self.tracks[tid] = {"bbox": det_bbox, "class": det_class, "keypoints": det.get("keypoints"), "missed": 0}
+                matched_ids.add(tid)
 
             x1, y1, x2, y2 = det_bbox
             results.append({
@@ -176,7 +178,7 @@ class SimpleTracker:
                 "floor_y": round(y2, 4),
                 "class": det_class,
                 "confidence": round(float(det.get("confidence", 0.85)), 3),
-                "keypoints": det.get("keypoints") or self.tracks[tid].get("keypoints") or [],
+                "keypoints": det.get("keypoints") or [],
                 "tracking_state": "predicted" if self.tracks[tid].get("missed", 0) else "tracked",
                 "_feature": det.get("feature")
             })
@@ -196,6 +198,7 @@ class CameraPersonTracker:
         self.event_callback = event_callback
         self.target_fps = target_fps
         self.tracker = SimpleTracker(max_age=15, min_iou=0.20)
+        self.temporal_stabilizer = TemporalDetectionStabilizer()
         self.reader = ZeroLatencyRTSPReader(rtsp_url, cam_id)
         self.running = False
         self.thread: Optional[threading.Thread] = None
@@ -343,6 +346,34 @@ class CameraPersonTracker:
                         detections.append(d)
 
                 tracked = self.tracker.update(detections)
+                tracked = self.temporal_stabilizer.update([
+                    {
+                        "local_id": item["local_id"],
+                        "class": item.get("class", "person"),
+                        "bbox": [item["x"], item["y"], item["w"], item["h"]],
+                        "keypoints": item.get("keypoints") or [],
+                        "tracking_state": item.get("tracking_state", "tracked"),
+                        "confidence": item.get("confidence", 0.0),
+                        "feature": item.get("_feature"),
+                    }
+                    for item in tracked
+                ])
+                tracked = [
+                    {
+                        **item,
+                        "id": item["local_id"],
+                        "x": item["bbox"][0],
+                        "y": item["bbox"][1],
+                        "w": item["bbox"][2],
+                        "h": item["bbox"][3],
+                        "keypoints": item.get("keypoints") or [],
+                        "keypoints_raw": item.get("keypoints_raw") or [],
+                        "keypoints_stale": item.get("keypoints_stale", False),
+                        "keypoints_age": item.get("keypoints_age", 0),
+                        "_feature": item.get("feature"),
+                    }
+                    for item in tracked
+                ]
 
                 # Assign labels with Camera-scoped matching
                 try:

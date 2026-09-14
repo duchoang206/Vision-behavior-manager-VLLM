@@ -44,8 +44,9 @@ class PersonLogic:
         frame_width = max(1.0, float(det.get("frame_width", 1)))
         frame_height = max(1.0, float(det.get("frame_height", 1)))
         aspect_ratio = bbox[2] * frame_width / max(bbox[3] * frame_height, 1e-6)
-        landmarks = valid_landmarks(det.get("keypoints"))
-        ground, ground_source = person_ground_point(bbox, det.get("keypoints"))
+        measured_points = det.get("keypoints_raw", det.get("keypoints"))
+        landmarks = valid_landmarks(measured_points)
+        ground, ground_source = person_ground_point(bbox, measured_points)
         torso_names = ("left_shoulder", "right_shoulder", "left_hip", "right_hip")
         pose_valid = all(name in landmarks for name in torso_names)
         torso_angle = None

@@ -4,6 +4,8 @@ import logging
 import math
 import os
 import time
+import threading
+from collections import deque
 from typing import Dict, Set, Optional, Any
 
 logger = logging.getLogger("FMSBridge")
@@ -79,6 +81,10 @@ class FMSBridge:
         # State tracking
         self.active_websockets: Set[Any] = set()
         self.robot_states: Dict[str, dict] = {}
+        self.pose_history = {}
+        self.pose_history_lock = threading.RLock()
+        self.pose_rejected_at = {}
+        self.datasocket_preference_sec = float(os.getenv("FMS_DATASOCKET_PREFERENCE_SEC", "2.0"))
         self.tick_counter: int = 0
         self.is_connected_mqtt: bool = False
         self.last_mqtt_packet_time: float = 0.0
@@ -115,6 +121,12 @@ class FMSBridge:
         age = now - float(existing.get("last_position_at", 0.0) or 0.0)
         return source in ("datasocket", "mqtt") and age < self.live_pose_ttl_sec
 
+    def _has_fresh_pose_source(self, robot: dict, source: str, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        if robot.get("last_position_source") != source:
+            return False
+        return now - float(robot.get("last_position_at", 0.0) or 0.0) < self.datasocket_preference_sec
+
     def _apply_pose_update(
         self,
         robot: dict,
@@ -125,10 +137,22 @@ class FMSBridge:
         raw_fms: Optional[dict] = None,
         velocity: Optional[float] = None,
     ) -> bool:
+        with self.pose_history_lock:
+            return self._apply_pose_update_locked(robot, pos_3d, heading_3d, map_id, source, raw_fms, velocity)
+
+    def _apply_pose_update_locked(self, robot, pos_3d, heading_3d, map_id, source, raw_fms, velocity):
         now = time.time()
+        try:
+            if len(pos_3d) != 3 or not all(math.isfinite(float(value)) for value in [*pos_3d, heading_3d]):
+                return False
+        except (TypeError, ValueError):
+            return False
+        if source == "mqtt" and self._has_fresh_pose_source(robot, "datasocket", now):
+            return False
         prev_pos = robot.get("position")
         prev_at = float(robot.get("last_position_at", 0.0) or 0.0)
-        if prev_pos and prev_at > 0:
+        previous_source = robot.get("last_position_source")
+        if prev_pos and prev_at > 0 and previous_source == source and source in {"mqtt", "datasocket"}:
             dt = max(0.05, now - prev_at)
             max_speed = float(robot.get("max_speed", 1.8) or 1.8)
             allowed_jump = max(self.pose_jump_floor_m, max_speed * dt * self.pose_jump_speed_factor)
@@ -141,6 +165,8 @@ class FMSBridge:
                     dt,
                     source,
                 )
+                with self.pose_history_lock:
+                    self.pose_rejected_at[str(robot.get("id"))] = now
                 return False
 
         robot["position"] = pos_3d
@@ -152,7 +178,56 @@ class FMSBridge:
             robot["raw_fms"] = raw_fms
         if velocity is not None:
             robot["velocity"] = velocity
+        if source in {"datasocket", "mqtt"} and all(math.isfinite(float(value)) for value in pos_3d):
+            with self.pose_history_lock:
+                history = self.pose_history.setdefault(str(robot.get("id")), deque(maxlen=300))
+                if previous_source != source:
+                    history.clear()
+                    self.pose_rejected_at.pop(str(robot.get("id")), None)
+                history.append({"at": now, "position": list(pos_3d), "source": source, "status": robot.get("status")})
         return True
+
+    def pose_at(self, robot_id, observed_at, max_skew=0.3, now=None):
+        now = time.time() if now is None else now
+        if not math.isfinite(observed_at) or not math.isfinite(now):
+            return None
+        requested_id = str(robot_id)
+        candidates = [requested_id]
+        if requested_id.startswith("Robot_"):
+            candidates.append(requested_id[6:])
+        else:
+            candidates.append(f"Robot_{requested_id}")
+        state_key = next((key for key in candidates if key in self.robot_states), None)
+        if state_key is None:
+            state_key = next((key for key in self.robot_states if key.casefold() == requested_id.casefold()), None)
+        state = self.robot_states.get(state_key) if state_key else None
+        if not state or state.get("status") == "OFFLINE":
+            return None
+        with self.pose_history_lock:
+            history = [sample for sample in self.pose_history.get(state_key, ()) if sample.get("status") != "OFFLINE"]
+            rejected_at = self.pose_rejected_at.get(state_key, 0)
+        if not history or now - history[-1]["at"] > 2.0:
+            return None
+        if history[-1]["at"] < rejected_at <= observed_at:
+            return None
+        preferred = [sample for sample in history if sample.get("source") == "datasocket" and now - sample["at"] < self.datasocket_preference_sec]
+        if preferred:
+            history = preferred
+        nearest = min(history, key=lambda sample: abs(sample["at"] - observed_at))
+        if abs(nearest["at"] - observed_at) > max_skew or observed_at > now + 0.05:
+            return None
+        before = next((sample for sample in reversed(history) if sample["at"] <= observed_at), None)
+        after = next((sample for sample in history if sample["at"] >= observed_at), None)
+        position = nearest["position"]
+        if before and after and 0 < after["at"] - before["at"] <= 2 * max_skew:
+            weight = (observed_at - before["at"]) / (after["at"] - before["at"])
+            position = [first + weight * (second - first) for first, second in zip(before["position"], after["position"])]
+        return {"position": position, "at": nearest["at"], "skew_ms": abs(nearest["at"] - observed_at) * 1000,
+                "source": nearest.get("source", "fms")}
+
+    def floor_to_fms(self, floor_x, floor_z):
+        return {"x": round(float(floor_x) + self.origin_x, 4),
+                "y": round(self.origin_y + self.layout_depth - float(floor_z), 4), "map_id": "TT"}
 
     def load_offset_maps_from_db(self):
         """Load nav_map offsets from PostgreSQL"""
@@ -510,18 +585,19 @@ class FMSBridge:
                 theta = pos.get("theta", 0.0)
                 pos_3d, heading_3d = self.to_3d_pose(pos["x"], pos["y"], theta, map_id)
                 if pos_3d is not None:
-                    self._apply_pose_update(
-                        robot,
-                        pos_3d,
-                        heading_3d,
-                        map_id,
-                        source="mqtt",
-                        raw_fms={
-                            "x": round(float(pos["x"]), 2),
-                            "y": round(float(pos["y"]), 2),
-                            "theta": round(float(theta), 2),
-                        },
-                    )
+                    if not self._has_fresh_pose_source(robot, "datasocket"):
+                        self._apply_pose_update(
+                            robot,
+                            pos_3d,
+                            heading_3d,
+                            map_id,
+                            source="mqtt",
+                            raw_fms={
+                                "x": round(float(pos["x"]), 2),
+                                "y": round(float(pos["y"]), 2),
+                                "theta": round(float(theta), 2),
+                            },
+                        )
 
             vel = payload.get("velocity", {})
             vx = vel.get("vx", 0.0)

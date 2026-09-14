@@ -28,8 +28,6 @@ def identity_global_id(label: Optional[str], category: Optional[str] = None, fal
         return fallback
     cat = (category or "").lower()
     lower = label.lower()
-    if cat == "person" or lower.startswith("person"):
-        return fallback
     if cat == "robot" or lower.startswith("robot"):
         robot_id = robot_number_from_label(label)
         return robot_id if robot_id is not None else stable_numeric_id(label)

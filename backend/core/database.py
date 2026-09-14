@@ -166,12 +166,12 @@ class DatabaseManager:
             except Exception as e:
                 logger.error(f"Error deleting camera: {e}")
 
-    def save_calibration(self, cam_id: str, src_points: list, dst_points: list, matrix: list, cam_x: float = None, cam_y: float = None, cam_z: float = None, yaw: float = None, fov_polygon: list = None):
+    def save_calibration(self, cam_id: str, src_points: list, dst_points: list, matrix: list, cam_x: float = None, cam_y: float = None, cam_z: float = None, yaw: float = None, fov_polygon: list = None, config: dict = None):
         with self._lock:
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                calib_json = json.dumps({"src_points": src_points, "dst_points": dst_points})
+                calib_json = json.dumps(dict(config or {}, src_points=src_points, dst_points=dst_points, matrix=matrix), allow_nan=False)
                 matrix_json = json.dumps(matrix)
                 fov_json = json.dumps(fov_polygon) if fov_polygon else None
                 cursor.execute('''
@@ -180,10 +180,13 @@ class DatabaseManager:
                         cam_x = %s, cam_y = %s, cam_z = %s, yaw = %s, fov_polygon = %s
                     WHERE id = %s
                 ''', (calib_json, matrix_json, cam_x, cam_y, cam_z, yaw, fov_json, cam_id))
+                saved = cursor.rowcount == 1
                 conn.commit()
                 conn.close()
+                return saved
             except Exception as e:
                 logger.error(f"Error saving calibration: {e}")
+                return False
 
     def get_all_cameras(self) -> List[dict]:
         with self._lock:
