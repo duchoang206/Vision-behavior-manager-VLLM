@@ -476,10 +476,10 @@ class DeepStreamManager:
         source_bin.connect("pad-added", self._cb_newpad, source_id)
         
         self.pipeline.add(source_bin)
-        # Set source to PAUSED first so it can negotiate caps without pipeline being PLAYING yet
-        source_bin.set_state(Gst.State.PAUSED)
         
         with self.lock:
+            self._pending_sink_pads = getattr(self, '_pending_sink_pads', {})
+            self._pending_sink_pads[source_id] = self.muxer.get_request_pad(f"sink_{source_id}")
             self.cam_id_to_source_id[cam_id] = source_id
             self.source_id_to_cam_id[source_id] = cam_id
             self.sources[source_id] = {
@@ -489,13 +489,14 @@ class DeepStreamManager:
                 "pad": None
             }
 
+        source_bin.sync_state_with_parent()
         print(f"[DeepStreamManager] Added camera {cam_id} as source_id {source_id} ({clean_url})")
         return False
 
     def _cb_newpad(self, decodebin, decoder_src_pad, source_id):
         pad_name_src = decoder_src_pad.get_name()
         print(f"[DeepStreamManager] pad-added signal received for source {source_id}: {pad_name_src}", flush=True)
-        if pad_name_src.startswith("audio"):
+        if pad_name_src.startswith(("audio", "asrc")):
             return
 
         with self.lock:
@@ -508,17 +509,6 @@ class DeepStreamManager:
                 if source_id in self.sources:
                     self.sources[source_id]["pad"] = sink_pad
                 print(f"[DeepStreamManager] Successfully linked pad sink_{source_id} for source {source_id}, ret: {ret}", flush=True)
-
-                # Now that pad is linked, set source to PLAYING
-                src_info = self.sources.get(source_id)
-                if src_info and src_info.get("bin"):
-                    src_info["bin"].set_state(Gst.State.PLAYING)
-
-                # If first source just linked, transition entire pipeline PAUSED → PLAYING
-                if not self._is_playing:
-                    self._is_playing = True
-                    play_ret = self.pipeline.set_state(Gst.State.PLAYING)
-                    print(f"[DeepStreamManager] First pad linked - pipeline set_state(PLAYING) ret={play_ret}", flush=True)
 
     def delete_source(self, cam_id: str) -> bool:
         """
@@ -832,6 +822,8 @@ class DeepStreamManager:
 
                 streams_payload.append({
                     "cam_id": cam_id,
+                    "frame_id": int(frame_meta.frame_num),
+                    "frame_pts_ns": int(frame_meta.buf_pts),
                     "objects": objects_list,
                     "tripwire_stats": tripwire_stats,
                     "rois": roi_states

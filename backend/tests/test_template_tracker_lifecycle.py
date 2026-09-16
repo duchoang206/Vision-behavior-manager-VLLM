@@ -4,6 +4,7 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
+from contextlib import nullcontext
 
 import numpy as np
 
@@ -30,6 +31,40 @@ class TemplateTrackerLifecycleTests(unittest.TestCase):
             self.assertTrue(self.manager.add_target("new-camera", "rtsp://physical", "Robot_42", "robot", self.bbox))
             start.assert_called_once()
             self.assertEqual("rtsp://127.0.0.1:8554/new-camera", tracker.stream_url)
+
+    def test_mask_inference_interval_does_not_limit_position_rate(self):
+        tracker = TemplateIdentityCameraTracker('cam', 'rtsp://physical', None, target_fps=25)
+        tracker.mask_target_fps = 15
+        tracker.running = True
+        tracker.targets['Robot_42'] = {'label': 'Robot_42', 'category': 'robot'}
+        reader = mock.Mock()
+        reader.get_latest_frame_packet.return_value = (True, np.zeros((20, 20, 3), dtype=np.uint8), 100.)
+        reader.status.return_value = {'reader_id': 'test', 'delivered_frame_id': 7}
+        with mock.patch('core.template_identity_tracker.registered_target_mask_segmenter') as segmenter, \
+                mock.patch.object(tracker, '_process_registered_frame', return_value=[]), \
+                mock.patch.object(tracker.mask_motion, 'seed', return_value=[]), \
+                mock.patch('core.template_identity_tracker.time.time', return_value=100.), \
+                mock.patch('core.template_identity_tracker.time.sleep') as sleep:
+            segmenter.available.return_value = True
+            segmenter.try_frame_slot.return_value = nullcontext(True)
+            sleep.side_effect = lambda duration: setattr(tracker, 'running', False)
+            tracker._process_frames(reader)
+            sleep.assert_called_once_with(1 / 25)
+            segmenter.try_frame_slot.assert_called_once_with('cam', 1 / 15)
+            self.assertEqual(7, tracker.reader_status['delivered_frame_id'])
+
+    def test_no_frame_does_not_consume_sam_slot(self):
+        tracker = TemplateIdentityCameraTracker('cam', 'rtsp://physical', None)
+        tracker.running = True
+        reader = mock.Mock()
+        reader.has_frame.return_value = False
+        with mock.patch('core.template_identity_tracker.registered_target_mask_segmenter') as segmenter, \
+                mock.patch('core.template_identity_tracker.time.sleep') as sleep:
+            sleep.side_effect = lambda duration: setattr(tracker, 'running', False)
+            tracker._process_frames(reader)
+            segmenter.try_frame_slot.assert_not_called()
+            segmenter.cancel_frame_wait.assert_called_once_with('cam')
+            reader.get_latest_frame_packet.assert_not_called()
 
     def test_start_recovers_dead_thread_without_duplicate_live_thread(self):
         tracker = TemplateIdentityCameraTracker("cam", "rtsp://physical", None)

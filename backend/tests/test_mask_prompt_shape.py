@@ -23,6 +23,8 @@ class MaskPromptShapeTests(unittest.TestCase):
                 runtime.cameras = {}
                 runtime.options = {}
                 runtime.preview = SimpleNamespace(model=object())
+                runtime.identity = mock.Mock()
+                runtime._identity_descriptor = mock.Mock(return_value=mock.Mock())
                 frame = np.zeros((height, width, 3), dtype=np.uint8)
                 predictor = mock.Mock()
 

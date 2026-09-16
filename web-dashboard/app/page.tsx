@@ -1,17 +1,23 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTab } from '../components/TabContext';
 import MonitorView from '../components/views/MonitorView';
 import BuildingView from '../components/views/BuildingView';
 import RobotMap3DView from '../components/views/RobotMap3DView';
 import AnalyticsView from '../components/views/AnalyticsView';
+import CalibrationView from '../components/views/CalibrationView';
 
 export default function DashboardRoot() {
   const { activeTab } = useTab();
+  const [calibrationOpened, setCalibrationOpened] = useState(false);
+  useEffect(() => { if (activeTab === 'calibration') setCalibrationOpened(true); }, [activeTab]);
 
   return (
     <>
+      <div style={{ display: activeTab === 'calibration' ? 'block' : 'none' }}>
+        {(calibrationOpened || activeTab === 'calibration') && <CalibrationView active={activeTab === 'calibration'} />}
+      </div>
       <div
         className={activeTab === 'monitor' ? 'tab-content-enter' : ''}
         style={{

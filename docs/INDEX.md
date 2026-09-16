@@ -7,6 +7,7 @@
 - [Bộ xử lý quy tắc an ninh & ROI](architecture/security_rules_engine.md)
 
 ## 📖 Hướng dẫn sử dụng
+- [Đăng ký đa góc nhìn, Triplet metric và Calibration](identity-calibration.md)
 - [Đăng ký nhãn vật thể với SAM 2](guides/sam2_target_registration.md)
 - [Bản đồ 3D Digital Twin FMS](guides/fms_3d_digital_twin.md)
 - [Tối ưu hóa hiệu năng GPU](guides/gpu_optimization.md)

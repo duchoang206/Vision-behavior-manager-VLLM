@@ -189,9 +189,14 @@ class TemplateIdentityCameraTracker:
         self.last_processing_ms = 0.0
         self._fps_window_started_at = time.time()
         self._fps_window_frames = 0
-        self.mask_motion = MaskMotionPropagator()
+        self.mask_motion = MaskMotionPropagator(
+            max_age=float(os.getenv("REGISTERED_MASK_FLOW_MAX_AGE", "1.8"))
+        )
         self.mask_inference_frames = 0
         self.motion_frames = 0
+        self.reader_status = {}
+        self.empty_mask_frames = 0
+        self.stale_mask_frames = 0
 
     def start(self):
         with self.lifecycle_lock:
@@ -221,6 +226,7 @@ class TemplateIdentityCameraTracker:
         frame_image: Optional[str] = None,
         reid_vector: Optional[List[float]] = None,
         reid_vectors: Optional[List[List[float]]] = None,
+        identity_vector: Optional[List[float]] = None,
     ):
         normalized = _normalize_bbox(bbox)
         if normalized is None:
@@ -234,7 +240,7 @@ class TemplateIdentityCameraTracker:
         elif reid_vector and len(reid_vector) == 512:
             reid_list.append(np.asarray(reid_vector, dtype=np.float32).tolist())
 
-        if not reid_list and template is not None:
+        if not reid_list and template is not None and category not in {"robot", "rack"}:
             try:
                 from core.reid_encoder import encode_crop
                 computed_vec = encode_crop(template)
@@ -255,6 +261,7 @@ class TemplateIdentityCameraTracker:
                 for rv in reid_list:
                     if not any(np.dot(np.asarray(rv, dtype=np.float32), np.asarray(srv, dtype=np.float32)) > 0.98 for srv in stored_reid):
                         stored_reid.append(rv)
+                del stored_reid[:-64]
                 existing.update({
                     "category": category or existing.get("category", "object"),
                     "bbox": normalized,
@@ -312,7 +319,7 @@ class TemplateIdentityCameraTracker:
             self.mask_motion.tracks.pop(label, None)
             samples = target.setdefault("mask_samples", [])
             if mask is not None and frame_image:
-                samples.append({"mask": mask, "frame_image": frame_image})
+                samples.append({"mask": mask, "frame_image": frame_image, "identity_vector": identity_vector})
                 del samples[:-16]
         print(
             f"[IdentityTemplate] Learned {label} on {self.cam_id} "
@@ -846,22 +853,30 @@ class TemplateIdentityCameraTracker:
     def _process_frames(self, reader):
         frame_interval = 1.0 / max(1, self.target_fps)
         while self.running:
+            if not reader.has_frame():
+                registered_target_mask_segmenter.cancel_frame_wait(self.cam_id)
+                time.sleep(0.005)
+                continue
             t0 = time.time()
             with self.lock:
                 has_masks = registered_target_mask_segmenter.available() and any(
                     eligible_target(target) for target in self.targets.values()
                 )
-                target_fps = min(self.target_fps, self.mask_target_fps) if has_masks else self.target_fps
+                target_fps = self.target_fps
                 frame_interval = 1.0 / max(1, target_fps)
                 slot = registered_target_mask_segmenter.try_frame_slot(self.cam_id, 1 / self.mask_target_fps) if has_masks else nullcontext(True)
                 with slot as can_infer:
                     ret, frame, decoded_at = reader.get_latest_frame_packet()
+                    self.reader_status = reader.status()
                     if ret and frame is not None:
                         started = time.monotonic()
                         if can_infer:
                             objects = self._process_registered_frame(frame, decoded_at=decoded_at)
                             if has_masks:
-                                self.mask_motion.seed(frame, objects, decoded_at)
+                                if time.time() - decoded_at <= float(os.getenv("REGISTERED_MASK_MAX_AGE", "0.5")):
+                                    objects = self.mask_motion.seed(frame, objects, decoded_at)
+                                else:
+                                    self.mask_motion.reset()
                                 self.mask_inference_frames += 1
                         else:
                             objects = self.mask_motion.update(frame, decoded_at)
@@ -884,6 +899,8 @@ class TemplateIdentityCameraTracker:
                             self.motion_frames += 1
                         self.last_processing_ms = round((time.monotonic() - started) * 1000, 1)
                         self.last_frame_age_ms = round(max(0.0, time.time() - decoded_at) * 1000, 1)
+                        if has_masks and not any(obj.get("mask") for obj in objects):
+                            self.empty_mask_frames += 1
             if not ret or frame is None:
                 time.sleep(min(0.01, frame_interval))
                 continue
@@ -910,6 +927,12 @@ class TemplateIdentityCameraTracker:
                     "timestamp": int(time.time() * 1000),
                     "streams": [{
                         "cam_id": self.cam_id,
+                        "reader_id": self.reader_status.get("reader_id"),
+                        "frame_id": self.reader_status.get("delivered_frame_id"),
+                        "processed_frame_id": self.processed_frames,
+                        "decoded_at": int(decoded_at * 1000),
+                        "processing_ms": self.last_processing_ms,
+                        "identity_rejected_labels": [target["label"] for target in list(self.targets.values()) if target.get("identity_rejection")],
                         "objects": objects,
                         "tripwire_stats": tripwire_stats,
                         "rois": roi_states,
@@ -939,6 +962,7 @@ class TemplateIdentityCameraTracker:
         observations = registered_target_mask_segmenter.track(self.cam_id, frame, mask_targets, seeds) if mask_enabled else {}
         max_mask_age = float(os.getenv("REGISTERED_MASK_MAX_AGE", "0.5"))
         if time.time() - decoded_at > max_mask_age:
+            self.stale_mask_frames += 1
             observations = {}
             for target in targets:
                 target["mask"] = None
@@ -946,6 +970,11 @@ class TemplateIdentityCameraTracker:
         objects = []
         for target in targets:
             observation = observations.get(target["label"]) if eligible_target(target) else None
+            if observation and observation.get("identity_rejected"):
+                target.update(mask=None, mask_observed_at=None, has_matched=False, velocity=[0.0] * 4,
+                              identity_rejection=observation.get("identity"))
+                self.mask_motion.tracks.pop(target["label"], None)
+                continue
             if observation and observation.get("mask"):
                 measured = _normalize_bbox(observation["bbox"])
                 if measured:
@@ -955,6 +984,7 @@ class TemplateIdentityCameraTracker:
                     if first_mask:
                         target["velocity"] = [0.0] * 4
                     target["has_matched"] = True
+                    target.pop("identity_rejection", None)
                     target["mask"] = observation["mask"]
                     target["mask_bbox"] = measured
                     target["mask_confidence"] = observation["mask"].get("confidence")
@@ -996,11 +1026,15 @@ class TemplateIdentityCameraTracker:
                 "decoder_threads": self.decoder_threads,
                 "last_frame_age_ms": self.last_frame_age_ms,
                 "last_processing_ms": self.last_processing_ms,
+                "reader": dict(self.reader_status),
                 "processed_frames": self.processed_frames,
                 "mask_inference_frames": self.mask_inference_frames,
                 "motion_frames": self.motion_frames,
                 "motion_enabled": self.motion_enabled,
-                "mask_tracking": registered_target_mask_segmenter.status(),
+                "empty_mask_frames": self.empty_mask_frames,
+                "stale_mask_frames": self.stale_mask_frames,
+                "mask_motion": self.mask_motion.status(),
+                "mask_tracking": registered_target_mask_segmenter.status(self.cam_id),
                 "targets": [
                     {
                         "label": t["label"],
@@ -1014,6 +1048,7 @@ class TemplateIdentityCameraTracker:
                         "gallery_size": len(t.get("templates") or []),
                         "velocity": [round(float(v), 4) for v in (t.get("velocity") or [0.0, 0.0, 0.0, 0.0])],
                         "mask_source": (t.get("mask") or {}).get("source") if t.get("mask") else None,
+                        "identity_rejection": t.get("identity_rejection"),
                     }
                     for t in self.targets.values()
                 ]
@@ -1058,6 +1093,7 @@ class TemplateIdentityTrackerManager:
         frame_image: Optional[str] = None,
         reid_vector: Optional[List[float]] = None,
         reid_vectors: Optional[List[List[float]]] = None,
+        identity_vector: Optional[List[float]] = None,
     ):
         with self.lifecycle_lock:
             tracker = self.add_camera(cam_id, rtsp_url)
@@ -1071,6 +1107,7 @@ class TemplateIdentityTrackerManager:
                 frame_image=frame_image,
                 reid_vector=reid_vector,
                 reid_vectors=reid_vectors,
+                identity_vector=identity_vector,
             )
             if success:
                 tracker.start()

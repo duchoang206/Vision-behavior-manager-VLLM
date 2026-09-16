@@ -8,6 +8,7 @@ import json
 import asyncio
 import base64
 import time
+import math
 import re
 import requests
 import cv2
@@ -27,6 +28,7 @@ from core.person_tracker import person_tracker_manager
 from core.template_identity_tracker import template_identity_tracker_manager
 from core.identity_utils import identity_global_id, robot_number_from_label
 from core.metadata_fusion import MetadataFusion
+from core.metadata_broadcaster import LatestMetadataBroadcaster, close_metadata_socket
 from core.mediamtx_client import mediamtx_client
 from core.registered_target_mask import decode_frame, validate_mask, registered_target_mask_segmenter
 from core.online_calibration import OnlineRobotCalibration
@@ -126,7 +128,8 @@ def _restore_template_targets_for_camera(cam_id: str, rtsp_url: str):
                     crop_image=sample.get("crop_image"),
                     mask=sample.get("mask"),
                     frame_image=sample.get("frame_image"),
-                    reid_vectors=sample.get("reid_vectors") or target_vectors,
+                    reid_vectors=(sample.get("reid_vectors") or target_vectors) if target.get("embedding_type") != "sam2_mask_512" else None,
+                    identity_vector=sample.get("identity_vector"),
                 )
     except Exception as e:
         print(f"[IdentityTemplate] Could not restore targets for {cam_id}: {e}", flush=True)
@@ -320,7 +323,7 @@ async def chat_with_bot(req: ChatMessage):
 
     return StreamingResponse(generate_response(), media_type="text/plain")
 # Active WebSocket connections
-connected_metadata_ws: Set[WebSocket] = set()
+metadata_broadcaster = LatestMetadataBroadcaster()
 connected_event_ws: Set[WebSocket] = set()
 loop: Optional[asyncio.AbstractEventLoop] = None
 latest_objects_by_cam: Dict[str, List[dict]] = {}
@@ -332,12 +335,18 @@ class CameraAddRequest(BaseModel):
     rtsp_url: str
 
 class CalibrationRequest(BaseModel):
-    src_points: List[List[float]] # 4 points normalized [[x,y]...]
-    dst_points: List[List[float]] # 4 points floor map [[X,Y]...]
+    src_points: List[List[float]]
+    dst_points: List[List[float]]
     cam_x: Optional[float] = None
     cam_y: Optional[float] = None
     cam_z: Optional[float] = None
     yaw: Optional[float] = None
+    method: Optional[str] = None
+    map_id: Optional[str] = None
+    fms_frame: Optional[Dict[str, float]] = None
+
+class CalibrationMeasureRequest(BaseModel):
+    points: List[Tuple[float, float]] = Field(min_length=2, max_length=256)
 
 class AutoCalibrationStartRequest(BaseModel):
     auto_apply: bool = False
@@ -549,7 +558,7 @@ def broadcast_metadata_sync(payload: dict):
     # Forward vision tracks to DigitalTwinBridge & enrich with real-time FMS telemetry
     try:
         from src.server.digital_twin_bridge import digital_twin_bridge
-        telemetry = digital_twin_bridge.build_telemetry_payload()
+        telemetry = digital_twin_bridge.get_latest_telemetry_payload()
         robot_map = {r.get("id"): r for r in telemetry.get("robots", []) if isinstance(r, dict)}
         
         if "streams" in payload and isinstance(payload["streams"], list):
@@ -584,11 +593,7 @@ def broadcast_metadata_sync(payload: dict):
     except Exception as e:
         pass
 
-    if not connected_metadata_ws:
-        return
-    msg = json.dumps(payload)
-    asyncio.run_coroutine_threadsafe(_broadcast_to_set(connected_metadata_ws, msg), loop)
-
+    metadata_broadcaster.publish(payload)
 
 def broadcast_template_metadata_sync(payload: dict):
     """Publish registered crop identities alongside DeepStream tracks."""
@@ -600,20 +605,28 @@ def broadcast_event_sync(event_payload: dict):
     msg = json.dumps(event_payload)
     asyncio.run_coroutine_threadsafe(_broadcast_to_set(connected_event_ws, msg), loop)
 
+async def _send_single_ws(ws: WebSocket, msg: str, disconnected: Set[WebSocket]):
+    try:
+        await asyncio.wait_for(ws.send_text(msg), timeout=0.10)
+    except Exception:
+        disconnected.add(ws)
+
 async def _broadcast_to_set(target_set: Set[WebSocket], msg: str):
+    if not target_set:
+        return
     disconnected = set()
-    for ws in list(target_set):
-        try:
-            await ws.send_text(msg)
-        except Exception:
-            disconnected.add(ws)
+    ws_list = list(target_set)
+    tasks = [_send_single_ws(ws, msg, disconnected) for ws in ws_list]
+    await asyncio.gather(*tasks, return_exceptions=True)
     for ws in disconnected:
         target_set.discard(ws)
+    await asyncio.gather(*(close_metadata_socket(ws) for ws in disconnected))
 
 @app.on_event("startup")
 async def startup_event():
     global loop, calibration_task
     loop = asyncio.get_running_loop()
+    metadata_broadcaster.start(loop)
     calibration_task = asyncio.create_task(_online_calibration_loop())
 
     # Start FMS Realtime Bridge
@@ -713,6 +726,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    await metadata_broadcaster.stop()
     if calibration_task:
         calibration_task.cancel()
         try:
@@ -764,14 +778,16 @@ async def _retry_offline_cameras(offline_list: list, interval: int = 30):
 @app.websocket("/ws/metadata")
 async def websocket_metadata_endpoint(websocket: WebSocket):
     await websocket.accept()
-    connected_metadata_ws.add(websocket)
+    metadata_broadcaster.register(websocket)
     try:
         while True:
             await websocket.receive_text()
-    except WebSocketDisconnect:
-        connected_metadata_ws.discard(websocket)
+    except (WebSocketDisconnect, RuntimeError):
+        pass
     except Exception:
-        connected_metadata_ws.discard(websocket)
+        pass
+    finally:
+        await metadata_broadcaster.unregister(websocket)
 
 @app.websocket("/ws/events")
 async def websocket_events_endpoint(websocket: WebSocket):
@@ -954,8 +970,21 @@ async def save_camera_calibration(cam_id: str, calib: CalibrationRequest):
         raise HTTPException(status_code=404, detail="Camera not found")
         
     try:
-        cfg = camera_calibrator.prepare_config(calib.src_points, calib.dst_points,
-            metadata=dict(cam_x=calib.cam_x, cam_y=calib.cam_y, cam_z=calib.cam_z, yaw=calib.yaw, method="homography"))
+        previous = camera_calibrator.get_config(cam_id) or {}
+        metadata = {key: getattr(calib, key) if getattr(calib, key) is not None else previous.get(key, cameras[cam_id].get(key))
+                    for key in ("cam_x", "cam_y", "cam_z", "yaw")}
+        metadata["method"] = "homography"
+        if calib.method == "manual_camera_fms_click":
+            from core.manual_calibration import prepare_manual_calibration
+            frame = {"origin_x": fms_bridge.origin_x, "origin_y": fms_bridge.origin_y, "layout_depth": fms_bridge.layout_depth}
+            if calib.map_id != "TT" or not calib.fms_frame or any(
+                not math.isfinite(calib.fms_frame.get(key, float("nan"))) or abs(calib.fms_frame.get(key, 0) - value) > 1e-6
+                for key, value in frame.items()
+            ):
+                raise HTTPException(409, "Hệ tọa độ FMS đã thay đổi. Hãy tải lại Calibration trước khi lưu.")
+            cfg = prepare_manual_calibration(camera_calibrator, calib.src_points, calib.dst_points, "TT", frame, metadata)
+        else:
+            cfg = camera_calibrator.prepare_config(calib.src_points, calib.dst_points, metadata=metadata)
         await asyncio.to_thread(online_robot_calibration.save_manual, cam_id, cfg)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
@@ -968,6 +997,19 @@ async def get_camera_calibration(cam_id: str):
     cfg = camera_calibrator.get_config(cam_id)
     return {"status": "success", "calibration": cfg,
             "fms_frame": {"origin_x": fms_bridge.origin_x, "origin_y": fms_bridge.origin_y, "layout_depth": fms_bridge.layout_depth}}
+
+@app.post("/api/camera/{cam_id}/calibration/measure")
+async def measure_camera_calibration(cam_id: str, request: CalibrationMeasureRequest):
+    if cam_id not in cameras:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    config = camera_calibrator.get_config(cam_id)
+    if not config or not config.get("matrix"):
+        raise HTTPException(status_code=409, detail="Camera này chưa được hiệu chuẩn. Hãy lưu Calibration trước khi đo.")
+    try:
+        from core.calibration_measurement import measure_calibrated_polyline
+        return {"status": "success", "camera_id": cam_id, **measure_calibrated_polyline(config, request.points)}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 @app.post("/api/camera/{cam_id}/calibration/auto/start")
 async def start_auto_camera_calibration(cam_id: str, request: AutoCalibrationStartRequest):
@@ -1197,38 +1239,51 @@ def register_crop_target_api(req: RegisterCropTargetRequest):
             decode_frame(req.frame_image)
         except (ValueError, TypeError) as exc:
             raise HTTPException(400, str(exc))
-    # Prefer the vector emitted by the active DeepStream/NvDCF track. This is
-    # the exact GPU embedding that will be compared on subsequent frames.
-    live_obj = _find_live_object_for_crop(req.cam_id, req.bbox)
+    is_mask_identity = req.category in {"robot", "rack"}
+    if is_mask_identity and (req.mask is None or not req.frame_image):
+        raise HTTPException(400, "Hãy tạo và xác nhận mask trên ảnh trước khi lưu góc nhìn robot/kệ.")
+    live_obj = _find_live_object_for_crop(req.cam_id, req.bbox) if not is_mask_identity else None
+    if live_obj and req.category == "person" and not _is_person_object(live_obj):
+        live_obj = None
     live_vector = live_obj.get("reid_vector") if live_obj else None
-
-    # The live detector/tracker emits NvDCF Re-ID embeddings. Prefer that exact
-    # vector for every mobile/static target; never compare CLIP and Re-ID merely
-    # because both happen to have 512 dimensions.
     try:
-        if isinstance(live_vector, list) and len(live_vector) == 512:
+        if is_mask_identity:
+            vector = registered_target_mask_segmenter.describe(decode_frame(req.frame_image), req.mask)
+            chosen_embedding_type = "sam2_mask_512"
+        elif isinstance(live_vector, list) and len(live_vector) == 512:
             vector = live_vector
             chosen_embedding_type = "reid_512"
         else:
             vector = _vector_from_crop_image(req.crop_image, category=req.category)
             chosen_embedding_type = "reid_512"
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Không thể tạo vector Re-ID 512-D từ ảnh crop: {exc}")
+        raise HTTPException(status_code=503, detail=f"Không thể trích xuất đặc trưng từ ảnh đã chọn: {exc}")
 
-    success = target_registry.register_target(
-        label,
-        vector,
-        cam_id=req.cam_id,
-        category=req.category,
-        bbox=req.bbox,
-        crop_image=req.crop_image,
-        embedding_type=chosen_embedding_type,
-        mask=req.mask,
-        frame_image=req.frame_image if req.mask is not None else None,
-    )
+    try:
+        success = target_registry.register_target(
+            label,
+            vector,
+            cam_id=req.cam_id,
+            category=req.category,
+            bbox=req.bbox,
+            crop_image=req.crop_image,
+            embedding_type=chosen_embedding_type,
+            mask=req.mask,
+            frame_image=req.frame_image if req.mask is not None else None,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not success:
+        raise HTTPException(422, "Không lưu được mẫu đặc trưng hợp lệ; nhãn hiện tại không thay đổi.")
 
     assigned_track = None
+    identity_status = None
     if success:
+        if is_mask_identity:
+            try:
+                identity_status = registered_target_mask_segmenter.learn_identity(label, req.cam_id, req.frame_image, req.mask, vector)
+            except Exception as exc:
+                identity_status = {"state": "pending", "last_error": str(exc)}
         if cam_info and req.bbox:
             template_identity_tracker_manager.add_target(
                 req.cam_id,
@@ -1239,8 +1294,9 @@ def register_crop_target_api(req: RegisterCropTargetRequest):
                 crop_image=req.crop_image,
                 mask=req.mask,
                 frame_image=req.frame_image if req.mask is not None else None,
-                reid_vector=vector,
-                reid_vectors=[vector] if vector else None,
+                reid_vector=vector if not is_mask_identity else None,
+                reid_vectors=[vector] if vector and not is_mask_identity else None,
+                identity_vector=vector if is_mask_identity else None,
             )
 
         if live_obj:
@@ -1279,20 +1335,22 @@ def register_crop_target_api(req: RegisterCropTargetRequest):
         "bbox": req.bbox,
         "samples_count": samples_cnt,
         "assigned_track": assigned_track,
-        "message": msg + (" Đã lưu mask và frame để bám vật theo các góc nhìn đã xác nhận." if req.mask is not None else "")
+        "identity": identity_status,
+        "message": msg + (" Đã lưu mẫu trên SSD; đặc trưng SAM được dùng kiểm tra danh tính và học triplet." if req.mask is not None else "")
     }
 
 @app.get("/api/registry/targets")
 async def get_registered_targets_api(cam_id: Optional[str] = None):
     from src.controller.registry import target_registry
     targets = target_registry.get_all_targets(cam_id=cam_id)
-    return {"status": "success", "targets": targets}
+    return {"status": "success", "targets": targets, "identity": registered_target_mask_segmenter.status().get("identity")}
 
 @app.delete("/api/registry/target/{label}")
 def delete_registered_target_api(label: str, cam_id: Optional[str] = None):
     from src.controller.registry import target_registry
     success = target_registry.remove_target(label, cam_id=cam_id)
     template_identity_tracker_manager.remove_target(label, cam_id=cam_id)
+    registered_target_mask_segmenter.forget_identity(label, cam_id)
     return {"status": "success" if success else "failed"}
 
 @app.delete("/api/camera/{cam_id}/registry/target/{label}")
@@ -1301,6 +1359,7 @@ def delete_registered_target_camera_sample_api(cam_id: str, label: str):
     from src.controller.registry import target_registry
     success = target_registry.remove_target(label, cam_id=cam_id)
     template_identity_tracker_manager.remove_target(label, cam_id=cam_id)
+    registered_target_mask_segmenter.forget_identity(label, cam_id)
     return {"status": "success" if success else "failed"}
 
 # --- ON-DEMAND ANALYTICS & EVENTS API (PostgreSQL Storage) ---
@@ -1378,11 +1437,13 @@ async def debug_pipeline():
         "detector_model": os.getenv("DEEPSTREAM_ONNX_FILE"),
         "detector_engine": os.getenv("DEEPSTREAM_ENGINE_FILE"),
         "detector_classes": ["person"],
-        "pose_backend": "deepstream_tensorrt",
+        "pose_enabled": manager.is_running and manager.pipeline is not None,
+        "pose_backend": "deepstream_tensorrt" if manager.pipeline is not None else "disabled",
         "pose_counts": getattr(manager, "_pose_counts", {}),
         "cpu_tracker_active_cameras": person_tracker_manager.active_cameras(),
         "template_identity_active_cameras": template_identity_tracker_manager.active_cameras(),
         "template_identity_state": template_identity_tracker_manager.debug_state(),
+        "metadata_transport": metadata_broadcaster.status(),
     }
 
 @app.get("/api/debug/metadata")
@@ -1479,12 +1540,15 @@ async def update_fms_config(config: dict):
     return fms_bridge.update_config(config)
 
 @app.get("/api/fms/layout")
-async def get_fms_layout():
+async def get_fms_layout(compact: bool = False):
     """Serve the 3D warehouse layout JSON"""
     layout_file = os.path.join(os.path.dirname(__file__), "warehouse_layout.json")
     if os.path.exists(layout_file):
         with open(layout_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+            layout = json.load(f)
+            if compact:
+                return {key: layout.get(key) for key in ("id", "name", "units", "size", "origin_world", "slam_map")}
+            return layout
     return {"error": "layout file not found"}
 
 @app.get("/health")

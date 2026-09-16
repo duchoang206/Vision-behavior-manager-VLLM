@@ -17,6 +17,13 @@ class RTSPLatestFrameReader:
         self.cam_id = cam_id
         self.max_reconnect_attempts = max_reconnect_attempts
         self.decoder_threads = decoder_threads
+        self.reader_id = str(time.monotonic_ns())
+        self.decoded_frames = 0
+        self.replaced_frames = 0
+        self.read_failures = 0
+        self.reconnects = 0
+        self.last_decoded_at = None
+        self.delivered_frame_id = None
         
         # Initialize video capture
         self.cap = self._open_capture()
@@ -46,6 +53,7 @@ class RTSPLatestFrameReader:
         while self.running:
             if not self.cap.isOpened():
                 print(f"[{self.cam_id}] Reconnecting to RTSP stream...")
+                self.reconnects += 1
                 self.cap = self._open_capture()
                 time.sleep(2)
                 
@@ -62,20 +70,25 @@ class RTSPLatestFrameReader:
             ret, frame = self.cap.read()
             decoded_at = time.time()
             if not ret:
+                self.read_failures += 1
                 print(f"[{self.cam_id}] Failed to read frame or stream ended. Attempting to reconnect...")
                 self.cap.release()
                 time.sleep(1)
                 continue
+
+            self.decoded_frames += 1
+            self.last_decoded_at = decoded_at
             
             # If the queue is full, remove the old frame before adding the new one
             if self.frame_queue.full():
                 try:
                     self.frame_queue.get_nowait()
+                    self.replaced_frames += 1
                 except queue.Empty:
                     pass
             
             # Put the latest frame into the queue
-            self.frame_queue.put((frame, decoded_at))
+            self.frame_queue.put((frame, decoded_at, self.decoded_frames))
 
     def get_latest_frame(self):
         """
@@ -90,10 +103,27 @@ class RTSPLatestFrameReader:
 
     def get_latest_frame_packet(self):
         try:
-            frame, decoded_at = self.frame_queue.get_nowait()
+            packet = self.frame_queue.get_nowait()
+            frame, decoded_at = packet[:2]
+            self.delivered_frame_id = packet[2] if len(packet) > 2 else None
             return True, frame, decoded_at
         except queue.Empty:
             return False, None, None
+
+    def has_frame(self):
+        return not self.frame_queue.empty()
+
+    def status(self):
+        return {
+            "reader_id": self.reader_id,
+            "running": self.running,
+            "decoded_frames": self.decoded_frames,
+            "replaced_frames": self.replaced_frames,
+            "read_failures": self.read_failures,
+            "reconnects": self.reconnects,
+            "last_decoded_at": self.last_decoded_at,
+            "delivered_frame_id": self.delivered_frame_id,
+        }
 
     def stop(self):
         """

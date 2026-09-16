@@ -7,12 +7,15 @@ Performs high-speed Cosine Similarity matching for cross-camera re-identificatio
 import os
 import json
 import time
+import copy
+import threading
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
 from core.identity_utils import identity_global_id, robot_number_from_label
 from core.registered_target_mask import validate_mask
+from core.registered_samples import RegisteredSampleStore
 
 
 class TargetRegistry:
@@ -28,6 +31,8 @@ class TargetRegistry:
             self.persist_path = base_dir / "data" / "registered_targets.json"
             
         self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+        self.sample_store = RegisteredSampleStore(self.persist_path.parent / "registered_samples")
+        self._write_lock = threading.RLock()
         
         # Structure: { label: { "label": str, "vector": np.ndarray, "created_at": float, "last_seen": float, "samples_count": int } }
         self.targets: Dict[str, Dict[str, Any]] = {}
@@ -216,7 +221,7 @@ class TargetRegistry:
         vectors = target.get("vectors") or ([target.get("vector")] if target.get("vector") is not None else [])
         return [np.asarray(v, dtype=np.float32).tolist() for v in vectors if v is not None and len(v) == 512]
 
-    def get_template_samples(self, label: str, cam_id: str) -> List[Dict[str, Any]]:
+    def get_template_samples(self, label: str, cam_id: str, limit=16) -> List[Dict[str, Any]]:
         """Return every trusted crop collected for one label on one camera."""
         target = self.targets.get(self._target_key(label, cam_id)) or self.targets.get(label)
         if not target:
@@ -236,7 +241,9 @@ class TargetRegistry:
         clean_vectors = [np.asarray(v, dtype=np.float32).tolist() for v in target_vectors if v is not None and len(v) == 512]
 
         samples = []
-        for crop in target.get("crops") or []:
+        stored_crops = target.get("crops") or []
+        for reference in stored_crops[-limit:] if limit else stored_crops:
+            crop = self.sample_store.read(reference)
             if crop.get("crop_image") and self._normalize_bbox(crop.get("bbox")):
                 samples.append({
                     "cam_id": cam_id,
@@ -248,6 +255,7 @@ class TargetRegistry:
                     "reid_vector": target.get("vector"),
                     "reid_vectors": clean_vectors,
                     "created_at": crop.get("created_at", 0),
+                    "identity_vector": crop.get("vector") if crop.get("embedding_type") == "sam2_mask_512" else None,
                 })
 
         latest = (target.get("samples_by_cam") or {}).get(cam_id)
@@ -270,7 +278,7 @@ class TargetRegistry:
             fallback = self.get_camera_sample(label, cam_id)
             if fallback and fallback.get("crop_image") and fallback.get("bbox"):
                 samples.append(fallback)
-        return samples[-16:]
+        return samples[-limit:] if limit else samples
 
     def _target_key(self, label: str, cam_id: Optional[str] = None) -> str:
         clean_label = (label or "").strip()
@@ -297,7 +305,20 @@ class TargetRegistry:
             )
         ), None)
 
-    def register_target(
+    def register_target(self, label, vector_512, cam_id=None, *args, **options):
+        with self._write_lock:
+            key = self._target_key(label, cam_id)
+            previous = copy.deepcopy(self.targets.get(key))
+            try:
+                return self._register_target(label, vector_512, cam_id, *args, **options)
+            except Exception:
+                if previous is None:
+                    self.targets.pop(key, None)
+                else:
+                    self.targets[key] = previous
+                raise
+
+    def _register_target(
         self,
         label: str,
         vector_512: List[float],
@@ -314,14 +335,14 @@ class TargetRegistry:
         """
         Registers or enriches a target’s multi-angle 512-dim embedding signatures.
         Accepts both 'reid_512' (NvDCF Re-ID) and 'clip_512' (CLIP ViT-B/32).
-        Each crop adds a new viewpoint angle into the target’s feature gallery (up to 16 angles).
+        Every registration is archived; only the active inference gallery is bounded.
         """
         mask = validate_mask(mask) if mask is not None else None
         if mask is not None and (category not in {"robot", "rack"} or not frame_image):
             raise ValueError("Mask chỉ dành cho robot/kệ và cần frame đăng ký.")
         embedding_type = str(embedding_type or "reid_512").strip().lower()
         # Accept reid_512 (NvDCF) and clip_512 (CLIP ViT-B/32 for Robot/Rack)
-        if embedding_type not in ("reid_512", "clip_512"):
+        if embedding_type not in ("reid_512", "clip_512", "sam2_mask_512"):
             print(f"❌ Unsupported embedding type '{embedding_type}' (Expected: reid_512 or clip_512)")
             return False
 
@@ -330,6 +351,8 @@ class TargetRegistry:
             return False
             
         vec = np.array(vector_512, dtype=np.float32)
+        if not np.isfinite(vec).all():
+            return False
         norm = float(np.linalg.norm(vec))
         if norm > 1e-6:
             vec = vec / norm
@@ -361,6 +384,11 @@ class TargetRegistry:
                 sample_payload.update(mask=mask, frame_image=frame_image)
             if crop_entry is not None:
                 crop_entry.update(mask=mask, frame_image=frame_image)
+        archived = self.sample_store.append(label, cam_id, {
+            **(crop_entry or {}), "vector": vec.tolist(), "embedding_type": embedding_type,
+            "label": label, "cam_id": cam_id, "category": category, "created_at": now,
+        })
+        crop_entry = archived
 
         if target_key in self.targets:
             # Update and enrich existing target on this camera with new angle view
@@ -381,7 +409,7 @@ class TargetRegistry:
             # If distinct viewpoint or gallery not full, append as new angle
             if max_existing_sim < 0.985 or len(existing_vectors) < 3:
                 existing_vectors.append(vec)
-                if len(existing_vectors) > 16:
+                if len(existing_vectors) > 64:
                     existing_vectors.pop(0)
             else:
                 # Update closest matching angle vector with slight EMA
@@ -391,8 +419,6 @@ class TargetRegistry:
 
             if crop_entry:
                 existing_crops.append(crop_entry)
-                if len(existing_crops) > 16:
-                    existing_crops.pop(0)
 
             # Recompute centroid vector across all angle samples
             target_data["vectors"] = existing_vectors
@@ -400,7 +426,7 @@ class TargetRegistry:
             centroid = centroid / (np.linalg.norm(centroid) + 1e-6)
             target_data["vector"] = centroid
             target_data["last_seen"] = now
-            target_data["samples_count"] = len(existing_vectors)
+            target_data["samples_count"] = max(target_data.get("samples_count", 0) + 1, len(existing_crops))
             target_data["embedding_type"] = embedding_type
             target_data["cam_id"] = cam_id or target_data.get("cam_id", "unknown")
             target_data["last_cam"] = cam_id or target_data.get("last_cam", "unknown")
@@ -737,7 +763,9 @@ class TargetRegistry:
                 "fms_robot_id": fms_robot_id,
                 "bbox": data.get("bbox"),
                 "has_crop_image": bool(data.get("crop_image")),
-                "mask_samples_count": sum(bool(crop.get("mask")) for crop in crops_list),
+                "mask_samples_count": sum(bool(crop.get("mask") or crop.get("has_mask")) for crop in crops_list),
+                "active_feature_count": vectors_count,
+                "registration_limit": None,
                 "samples_by_cam": {
                     cid: {
                         "cam_id": sample.get("cam_id", cid),
@@ -751,6 +779,10 @@ class TargetRegistry:
         return result
 
     def remove_target(self, label: str, cam_id: Optional[str] = None) -> bool:
+        with self._write_lock:
+            return self._remove_target(label, cam_id)
+
+    def _remove_target(self, label: str, cam_id: Optional[str] = None) -> bool:
         """
         Removes a target independently on a specific camera, or globally if no cam_id is provided.
         Deleting on one camera never affects another camera.
@@ -797,6 +829,10 @@ class TargetRegistry:
         return self.remove_target(label, cam_id=cam_id)
 
     def save_to_disk(self):
+        with self._write_lock:
+            self._save_to_disk()
+
+    def _save_to_disk(self):
         """Serializes targets to JSON file with atomic write to prevent corruption on reset"""
         try:
             serializable = {}
@@ -827,6 +863,7 @@ class TargetRegistry:
             tmp_path.replace(self.persist_path)
         except Exception as e:
             print(f"Error saving targets registry: {e}")
+            raise RuntimeError("Không lưu được registry xuống SSD.") from e
 
     def load_from_disk(self):
         """Loads registered targets from JSON file and restores all multi-angle feature vectors"""

@@ -45,7 +45,8 @@ export function CameraProvider({ children }: { children: React.ReactNode }) {
             if (prev.length === data.cameras.length) {
               const unchanged = prev.every((cam, i) => {
                 const n = data.cameras[i];
-                return n && cam.id === n.id && cam.name === n.name && cam.rtsp_url === n.rtsp_url && cam.status === n.status;
+                return n && cam.id === n.id && cam.name === n.name && cam.rtsp_url === n.rtsp_url && cam.status === n.status
+                  && JSON.stringify(cam.calibration) === JSON.stringify(n.calibration);
               });
               if (unchanged) return prev;
             }

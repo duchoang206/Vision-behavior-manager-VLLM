@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Video, Building2, Bot, BarChart3 } from 'lucide-react';
+import { Video, Building2, Bot, BarChart3, Crosshair } from 'lucide-react';
 import { useLanguage } from './LanguageContext';
 import { useTab, type TabType } from './TabContext';
 import styles from './DashboardShell.module.css';
@@ -9,6 +9,7 @@ import styles from './DashboardShell.module.css';
 export const workspaceTabs = [
   { id: 'monitor', labelKey: 'monitor', icon: Video, keywords: 'camera live giám sát trực tiếp' },
   { id: 'building', labelKey: 'building', icon: Building2, keywords: 'camera config cấu hình label nhãn roi tripwire' },
+  { id: 'calibration', labelKey: 'calibration', icon: Crosshair, keywords: 'calibration hiệu chuẩn camera fms tọa độ chấm điểm' },
   { id: 'robot_map', labelKey: 'robotMap', icon: Bot, keywords: 'map robot 3d bản đồ fms' },
   { id: 'analytics', labelKey: 'analytics', icon: BarChart3, keywords: 'analytics report phân tích báo cáo' },
 ] as const;

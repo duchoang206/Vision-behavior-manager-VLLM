@@ -46,6 +46,8 @@ tools/
 backend/.model-tools/
 web-dashboard/.next.stale-*/
 backend/data/workflows.json
+backend/data/registered_samples/
+backend/data/identity_metric/
 
 recordings/
 backend/runs/

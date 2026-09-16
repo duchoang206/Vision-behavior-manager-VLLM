@@ -3,6 +3,7 @@ export const translations = {
     nav: {
       monitor: 'Monitor',
       building: 'Building',
+      calibration: 'Calibration',
       robotMap: 'Map Robot 3D',
       operation: 'Operation',
       analytics: 'Analytics',
@@ -83,6 +84,7 @@ export const translations = {
     nav: {
       monitor: 'Giám sát',
       building: 'Tòa nhà',
+      calibration: 'Calibration',
       robotMap: 'Bản đồ Robot 3D',
       operation: 'Vận hành',
       analytics: 'Thống kê',

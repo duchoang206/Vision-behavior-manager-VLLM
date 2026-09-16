@@ -4,7 +4,7 @@ import base64
 import tempfile
 import time
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -25,11 +25,11 @@ def encode(image):
 
 
 class RegisteredTargetMaskTests(unittest.TestCase):
-    def test_mask_rate_limit_keeps_people_at_original_rate(self):
+    def test_mask_rate_limit_never_caps_position_updates(self):
         with mock.patch.dict(os.environ, {'REGISTERED_MASK_TARGET_FPS': '11'}):
             tracker = TemplateIdentityCameraTracker('cam', '', None, target_fps=24)
         frame = np.zeros((20, 20, 3), dtype=np.uint8)
-        for category, expected_interval in [('robot', 1 / 11), ('person', 1 / 24)]:
+        for category in ['robot', 'person']:
             with self.subTest(category=category):
                 tracker.running = True
                 tracker.targets = {'registered': {'label': 'registered', 'category': category}}
@@ -40,12 +40,13 @@ class RegisteredTargetMaskTests(unittest.TestCase):
                     tracker.running = False
                     return []
 
-                with mock.patch('core.template_identity_tracker.registered_target_mask_segmenter'), \
+                with mock.patch('core.template_identity_tracker.registered_target_mask_segmenter') as segmenter, \
                         mock.patch.object(tracker, '_process_registered_frame', side_effect=process_frame), \
                         mock.patch('core.template_identity_tracker.time.time', return_value=100.0), \
                         mock.patch('core.template_identity_tracker.time.sleep') as sleep:
+                    segmenter.try_frame_slot.return_value = nullcontext(True)
                     tracker._process_frames(reader)
-                sleep.assert_called_once_with(expected_interval)
+                sleep.assert_called_once_with(1 / 24)
 
     def test_only_registered_robot_and_rack_targets_are_eligible(self):
         self.assertTrue(eligible_target({"label": "Robot_2001", "category": "robot"}))

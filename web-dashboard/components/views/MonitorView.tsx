@@ -5,6 +5,8 @@ import { useLanguage } from '../LanguageContext';
 import { useCameras, Camera } from '../CameraContext';
 import { useAppTheme } from '../ThemeContext';
 import { RegisteredMask, validRegisteredMask } from '../../lib/registered-mask';
+import { LiveRegisteredMask, MASK_BRIDGE_MS, metadataReceivedAt, updateLiveRegisteredMask } from '../../lib/live-registered-mask';
+import { connectRealtimeSocket, createMetadataClock } from '../../lib/realtime-socket';
 import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radio, Boxes, Package, CheckCircle2, Grid3X3, Bot, Tag, Sparkles, Trash2, X, Check, Search, Sliders } from 'lucide-react';
 
 
@@ -14,6 +16,9 @@ type TrackedObject = {
   class: string;
   label?: string;
   mask?: RegisteredMask | null;
+  observed_at?: number;
+  tracking_state?: string;
+  mask_stale?: boolean;
   x: number; // 0..1
   y: number; // 0..1
   w: number; // 0..1
@@ -49,7 +54,8 @@ type InterpolatedTrack = {
   id: number;
   class?: string;
   label?: string;
-  mask?: RegisteredMask | null;
+  maskFrame?: LiveRegisteredMask | null;
+  observedAt?: number;
   curX: number;
   curY: number;
   curW: number;
@@ -158,8 +164,8 @@ const isCameraDrawableRoi = (roi: ROIState) =>
   && ((roi.rule_type || '').toLowerCase() !== 'occupancy' || isStorageSlotRoi(roi));
 const filterRealConfiguredRois = (rois: ROIState[]) =>
   rois.filter(roi => (roi.rule_type || '').toLowerCase() !== 'occupancy' || isStorageSlotRoi(roi));
-const TRACK_HOLD_MS = 750;
-const TRACK_FADE_START_MS = 250;
+const TRACK_HOLD_MS = 1200;
+const TRACK_FADE_START_MS = 350;
 
 const mergeRois = (existing: ROIState[] = [], incoming: ROIState[] = []) => {
   if (incoming.length === 0) return [];
@@ -358,8 +364,10 @@ function CameraStreamCard({
               const isPerson = rawClass.includes('person') || rawClass.includes('human') || rawClass.includes('worker');
               const isFallen = Boolean(track.fall_detected || track.posture === 'fallen');
               const hasCustomLabel = hasRegisteredLabel(track.label);
-              const drawMask = !isPerson && hasCustomLabel && validRegisteredMask(track.mask)
-                && (!track.mask.observed_at || now - track.mask.observed_at < 500);
+              const registeredTarget = !isPerson && hasCustomLabel && isRobotClass(track.class);
+              const mask = track.maskFrame && now - track.maskFrame.receivedAt <= MASK_BRIDGE_MS
+                ? track.maskFrame.mask : null;
+              const drawMask = registeredTarget && Boolean(mask);
               if (!shouldShowTrackIdentity(track.class, track.label)) {
                 return;
               }
@@ -367,6 +375,7 @@ function CameraStreamCard({
               const label = isPerson ? `person #${track.id}`
                 : hasCustomLabel ? (isRobot ? track.label!.toLowerCase() : track.label!)
                   : `${displayClass} #${track.id}`;
+              const displayLabel = registeredTarget && !drawMask ? `${label} · chờ mask` : label;
 
               // Dynamic Accent Colors (Cyan for verified registered targets, Rose for robots, Indigo for racks)
               const strokeColor = isFallen ? '#ef4444' : hasCustomLabel ? '#22d3ee' : (isRobot ? '#f43f5e' : isPerson ? '#22c55e' : '#6366f1');
@@ -378,9 +387,9 @@ function CameraStreamCard({
               ctx.lineWidth = hasCustomLabel ? 2.5 : 1.5;
               ctx.shadowColor = strokeColor;
               ctx.shadowBlur = hasCustomLabel ? 14 : 8;
-              if (drawMask && track.mask) {
+              if (drawMask && mask) {
                 ctx.beginPath();
-                track.mask.polygons.forEach(ring => {
+                mask.polygons.forEach(ring => {
                   ctx.moveTo(mapVideoX(ring[0][0]), mapVideoY(ring[0][1]));
                   ring.slice(1).forEach(point => ctx.lineTo(mapVideoX(point[0]), mapVideoY(point[1])));
                   ctx.closePath();
@@ -388,7 +397,7 @@ function CameraStreamCard({
                 ctx.fillStyle = fillColor;
                 ctx.fill('evenodd');
                 ctx.stroke();
-              } else if (!isPerson) {
+              } else if (!isPerson && !registeredTarget) {
                 ctx.strokeRect(px, py, pw, ph);
               }
               ctx.shadowBlur = 0;
@@ -416,11 +425,11 @@ function CameraStreamCard({
               }
 
               ctx.fillStyle = fillColor;
-              if (!drawMask && !isPerson) ctx.fillRect(px, py, pw, ph);
+              if (!drawMask && !isPerson && !registeredTarget) ctx.fillRect(px, py, pw, ph);
 
               // Label Tag Badge
               ctx.font = `${isPerson ? '500 10px' : 'bold 12px'} "JetBrains Mono", "Space Grotesk", monospace`;
-              const textMetrics = ctx.measureText(label);
+              const textMetrics = ctx.measureText(displayLabel);
               const tagPadding = isPerson ? 4 : 6;
               const tagW = textMetrics.width + tagPadding * 2;
               const tagH = isPerson ? 14 : 20;
@@ -432,7 +441,7 @@ function CameraStreamCard({
               ctx.fill();
 
               ctx.fillStyle = '#ffffff';
-              ctx.fillText(label, px + tagPadding, tagY + (isPerson ? 10 : 14));
+              ctx.fillText(displayLabel, px + tagPadding, tagY + (isPerson ? 10 : 14));
               ctx.restore();
             });
           }
@@ -587,7 +596,7 @@ function CameraStreamCard({
   );
 }
 
-export default function MonitorView() {
+export default function MonitorView({ isActive = true }: { isActive?: boolean } = {}) {
 	  const { cameras } = useCameras();
 	  const [activeTab, setActiveTab] = useState('all');
 	  const [hostName] = useState(() => (typeof window !== 'undefined' ? (window.location.hostname || '192.168.5.104') : '192.168.5.104'));
@@ -604,6 +613,7 @@ export default function MonitorView() {
 
 	  const [showFleetRegistryModal, setShowFleetRegistryModal] = useState(false);
 	  const [registeredTargets, setRegisteredTargets] = useState<RegisteredTargetItem[]>([]);
+  const lastUiUpdateRef = useRef<number>(0);
 
   const fetchRegisteredTargets = useCallback(() => {
     fetch('/api/backend/registry/targets')
@@ -756,15 +766,20 @@ export default function MonitorView() {
 	    if (typeof window !== 'undefined') {
 	      const host = hostName;
 
-      let wsMeta: WebSocket | null = null;
-      let wsEvents: WebSocket | null = null;
-
-      const connectMeta = () => {
-        wsMeta = new WebSocket(`ws://${host}:8000/ws/metadata`);
-        wsMeta.onopen = () => setMetadataConnected(true);
-        wsMeta.onmessage = (event) => {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const metadataClock = createMetadataClock();
+      const latestPacketByCam = new Map<string, number>();
+      const disconnectMeta = connectRealtimeSocket({
+        url: `${protocol}://${host}:8000/ws/metadata`,
+        idleTimeoutMs: 3000,
+        onStatus: setMetadataConnected,
+        onMessage: (event) => {
           try {
             const data = JSON.parse(event.data);
+            if (!data || (!Array.isArray(data.streams) && data.type !== 'metadata_heartbeat')) return false;
+            const transportAgeMs = metadataClock(data.timestamp);
+            if (transportAgeMs === null) return false;
+            if (data.type === 'metadata_heartbeat') return true;
             if (data.streams && Array.isArray(data.streams)) {
               let count = 0;
               const now = Date.now();
@@ -773,14 +788,24 @@ export default function MonitorView() {
               const countsByCam: Record<string, number> = {};
               let processedAnyStream = false;
 
-              data.streams.forEach((stream: { cam_id: string; objects: TrackedObject[]; rois?: ROIState[] }, index: number) => {
+              data.streams.forEach((stream: { cam_id: string; objects: TrackedObject[]; rois?: ROIState[]; identity_rejected_labels?: string[] }, index: number) => {
                 const camId = resolveStreamCamId(stream.cam_id, index, camerasRef.current);
+                if (Number.isFinite(data.timestamp)) {
+                  if (data.timestamp < (latestPacketByCam.get(camId) ?? -Infinity)) return;
+                  latestPacketByCam.set(camId, data.timestamp);
+                }
                 const identities = new Map<string, TrackedObject>();
                 (Array.isArray(stream.objects) ? stream.objects : []).forEach(obj => {
-                  if (!shouldShowTrackIdentity(obj.class, obj.label)) return;
+                  if (!shouldShowTrackIdentity(obj.class, obj.label)
+                    || /lost|removed|deleted/i.test(obj.tracking_state || '')) return;
                   const key = hasRegisteredLabel(obj.label) ? `label:${obj.label!.trim().toLowerCase()}` : `person:${obj.id}`;
                   const existing = identities.get(key);
-                  if (!existing || (obj.confidence ?? 0) > (existing.confidence ?? 0)) identities.set(key, obj);
+                  const newer = (obj.observed_at ?? 0) > (existing?.observed_at ?? 0);
+                  const sameTime = obj.observed_at === existing?.observed_at;
+                  const betterMask = validRegisteredMask(obj.mask) && !validRegisteredMask(existing?.mask);
+                  if (!existing || newer || (sameTime && (betterMask
+                    || (validRegisteredMask(obj.mask) === validRegisteredMask(existing.mask)
+                      && (obj.confidence ?? 0) > (existing.confidence ?? 0))))) identities.set(key, obj);
                 });
                 const streamObjects = Array.from(identities.values());
                 const lastPrimaryAt = lastPrimaryObjectsByCamRef.current.get(camId) || 0;
@@ -799,15 +824,41 @@ export default function MonitorView() {
                   metadataMap.current.set(camId, new Map());
                 }
                 const tracks = metadataMap.current.get(camId)!;
+                const rejectedLabels = new Set((stream.identity_rejected_labels || []).map(label => label.trim().toLowerCase()));
+                tracks.forEach((track, trackId) => {
+                  if (!track.label || !rejectedLabels.has(track.label.trim().toLowerCase())) return;
+                  tracks.delete(trackId);
+                  if (floorTrackMap.current.get(trackId)?.cam === camId) floorTrackMap.current.delete(trackId);
+                });
+                streamObjects.forEach(obj => {
+                  if (tracks.has(obj.id) || !hasRegisteredLabel(obj.label) || !isRobotClass(obj.class)) return;
+                  const previous = Array.from(tracks.entries()).find(([, track]) =>
+                    track.label?.trim().toLowerCase() === obj.label!.trim().toLowerCase());
+                  if (previous && now - previous[1].lastUpdated <= TRACK_HOLD_MS) {
+                    tracks.delete(previous[0]);
+                    previous[1].id = obj.id;
+                    tracks.set(obj.id, previous[1]);
+                  }
+                });
                 const incomingIds = new Set(streamObjects.map(obj => obj.id));
                 tracks.forEach((track, trackId) => {
-                  if (!incomingIds.has(trackId)) tracks.delete(trackId);
+                  const removed = stream.objects?.some(obj => obj.id === trackId
+                    && /lost|removed|deleted/i.test(obj.tracking_state || ''));
+                  if (removed || (!incomingIds.has(trackId) && (!isRobotClass(track.class)
+                    || now - track.lastUpdated > TRACK_HOLD_MS))) tracks.delete(trackId);
                 });
 
                 const visibleObjects = streamObjects.filter(obj => shouldShowTrackIdentity(obj.class, obj.label));
                 countsByCam[camId] = visibleObjects.length;
 
                 streamObjects.forEach(obj => {
+                  const previous = tracks.get(obj.id);
+                  if (previous?.observedAt !== undefined && obj.observed_at !== undefined
+                    && obj.observed_at < previous.observedAt) return;
+                  const repeated = previous?.observedAt !== undefined && previous.observedAt === obj.observed_at;
+                  const receivedAt = repeated ? previous!.lastUpdated
+                    : metadataReceivedAt(now, obj.observed_at, data.timestamp, transportAgeMs);
+                  const maskFrame = updateLiveRegisteredMask(previous?.maskFrame, obj, now, data.timestamp, transportAgeMs);
                   const showIdentity = shouldShowTrackIdentity(obj.class, obj.label);
                   if (showIdentity) count++;
                   const fx = obj.floor_x ?? (obj.x + obj.w / 2);
@@ -822,23 +873,23 @@ export default function MonitorView() {
                         id: obj.id, class: obj.label || obj.class,
                         curFx: fx, curFy: fy,
                         targetFx: fx, targetFy: fy,
-                        cam: camId, lastUpdated: now
+                        cam: camId, lastUpdated: receivedAt
                       });
                     } else {
                       const ft = floorTrackMap.current.get(obj.id)!;
                       if (obj.label || obj.class) ft.class = obj.label || obj.class;
                       ft.targetFx = fx; ft.targetFy = fy;
-                      ft.cam = camId; ft.lastUpdated = now;
+                      ft.cam = camId; ft.lastUpdated = receivedAt;
                     }
                   }
 
                   if (!tracks.has(obj.id)) {
                     tracks.set(obj.id, {
                       id: obj.id, class: obj.class, label: obj.label,
-                      mask: !isPersonClass(obj.class) && hasRegisteredLabel(obj.label) && validRegisteredMask(obj.mask) ? obj.mask : null,
+                      maskFrame, observedAt: obj.observed_at,
                       curX: obj.x, curY: obj.y, curW: obj.w, curH: obj.h,
                       targetX: obj.x, targetY: obj.y, targetW: obj.w, targetH: obj.h,
-                      floorX: fx, floorY: fy, lastUpdated: now,
+                      floorX: fx, floorY: fy, lastUpdated: receivedAt,
                       fms_status: obj.fms_status,
                       fms_battery: obj.fms_battery,
                       fms_speed: obj.fms_speed,
@@ -856,11 +907,12 @@ export default function MonitorView() {
                     const track = tracks.get(obj.id)!;
                     track.class = obj.class;
                     track.label = obj.label;
-                    track.mask = !isPersonClass(obj.class) && hasRegisteredLabel(obj.label) && validRegisteredMask(obj.mask) ? obj.mask : null;
+                    track.maskFrame = maskFrame;
+                    track.observedAt = obj.observed_at;
                     track.targetX = obj.x; track.targetY = obj.y;
                     track.targetW = obj.w; track.targetH = obj.h;
                     track.floorX = fx; track.floorY = fy;
-                    track.lastUpdated = now;
+                    track.lastUpdated = receivedAt;
                     if (obj.fms_status !== undefined) track.fms_status = obj.fms_status;
                     if (obj.fms_battery !== undefined) track.fms_battery = obj.fms_battery;
                     if (obj.fms_speed !== undefined) track.fms_speed = obj.fms_speed;
@@ -877,40 +929,36 @@ export default function MonitorView() {
                 });
               });
 
-              if (!processedAnyStream) return;
-              setTotalDetections(count);
-              setMetadataCounts(prev => ({ ...prev, ...countsByCam }));
-              setGlobalTrackList(activeGlobals);
-              setCameraRois(Object.fromEntries(roisMap.current));
+              if (!processedAnyStream) return true;
+              if (now - lastUiUpdateRef.current >= 250) {
+                lastUiUpdateRef.current = now;
+                setTotalDetections(count);
+                setMetadataCounts(prev => ({ ...prev, ...countsByCam }));
+                setGlobalTrackList(activeGlobals);
+                setCameraRois(Object.fromEntries(roisMap.current));
+              }
             }
-          } catch (e) {}
-        };
-        wsMeta.onerror = () => setMetadataConnected(false);
-        wsMeta.onclose = () => {
-          setMetadataConnected(false);
-          setTimeout(connectMeta, 2500);
-        };
-      };
+            return true;
+          } catch { return false; }
+        },
+      });
 
-      const connectEvents = () => {
-        wsEvents = new WebSocket(`ws://${host}:8000/ws/events`);
-        wsEvents.onmessage = (event) => {
+      const disconnectEvents = connectRealtimeSocket({
+        url: `${protocol}://${host}:8000/ws/events`,
+        onMessage: (event) => {
           try {
             const data = JSON.parse(event.data);
             if (data.event) {
               setLiveAlerts(prev => [data.event, ...prev].slice(0, 30));
             }
-          } catch (e) {}
-        };
-        wsEvents.onclose = () => setTimeout(connectEvents, 2500);
-      };
-
-      connectMeta();
-      connectEvents();
+            return true;
+          } catch { return false; }
+        },
+      });
 
       return () => {
-        if (wsMeta) wsMeta.close();
-        if (wsEvents) wsEvents.close();
+        disconnectMeta();
+        disconnectEvents();
       };
     }
 	  }, [hostName]);

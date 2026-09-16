@@ -244,6 +244,15 @@ class DigitalTwinBridge:
             for k in stale_keys:
                 del d[k]
 
+    def get_latest_telemetry_payload(self, max_age: float = 0.15) -> dict:
+        now = time.time()
+        if hasattr(self, "_last_telemetry_payload") and self._last_telemetry_payload and (now - getattr(self, "_last_telemetry_at", 0) < max_age):
+            return self._last_telemetry_payload
+        payload = self.build_telemetry_payload()
+        self._last_telemetry_payload = payload
+        self._last_telemetry_at = now
+        return payload
+
     def build_telemetry_payload(self) -> dict:
         """
         Constructs high-frequency real-time 3D payload.

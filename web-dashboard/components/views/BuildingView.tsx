@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useCameras } from '../CameraContext';
+import { useTab } from '../TabContext';
 import { useAppTheme } from '../ThemeContext';
 import { RegisteredMask, validRegisteredMask, maskPath } from '../../lib/registered-mask';
 import {
@@ -44,6 +45,7 @@ type TargetRegistryItem = {
   has_crop_image?: boolean;
   mask_samples_count?: number;
 };
+type IdentityLearning = { state?: string; revision?: number; samples?: number; training?: boolean; last_error?: string; labels?: Record<string, number> };
 type EmptyStateColors = {
   borderHard: string;
   textMuted: string;
@@ -171,6 +173,8 @@ export default function BuildingView() {
   const [isSavingLabel, setIsSavingLabel] = useState(false);
   const [labelStatus, setLabelStatus] = useState('');
   const [registeredTargets, setRegisteredTargets] = useState<TargetRegistryItem[]>([]);
+  const [identityLearning, setIdentityLearning] = useState<IdentityLearning | null>(null);
+  const { activeTab: workspaceTab } = useTab();
 
   useEffect(() => {
     if (activeTab !== 'label') return;
@@ -219,7 +223,7 @@ export default function BuildingView() {
     const url = camId ? `/api/backend/registry/targets?cam_id=${encodeURIComponent(camId)}` : '/api/backend/registry/targets';
     fetch(url)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (Array.isArray(d?.targets)) setRegisteredTargets(d.targets); })
+      .then(d => { if (Array.isArray(d?.targets)) setRegisteredTargets(d.targets); if (d?.identity) setIdentityLearning(d.identity); })
       .catch(() => {});
   }, []);
 
@@ -237,6 +241,12 @@ export default function BuildingView() {
   useEffect(() => {
     if (activeTab === 'label') fetchRegisteredTargets(labelCamId);
   }, [activeTab, labelCamId, fetchRegisteredTargets]);
+
+  useEffect(() => {
+    if (workspaceTab !== 'building' || activeTab !== 'label') return;
+    const interval = setInterval(() => fetchRegisteredTargets(labelCamId), 3000);
+    return () => clearInterval(interval);
+  }, [workspaceTab, activeTab, labelCamId, fetchRegisteredTargets]);
 
   useEffect(() => {
     fetch('/api/backend/model/classes').then(r => r.json())
@@ -529,7 +539,7 @@ export default function BuildingView() {
       setLabelCamId(target.last_cam);
     }
     resetLabelMaskState();
-    setLabelStatus('');
+    setLabelStatus('Giữ nguyên tên nhãn này, lấy frame mới và khoanh đúng vật ở góc nhìn khác để bổ sung mẫu.');
     setSnapshotTimestamp(prev => prev + 1);
   };
 
@@ -1101,7 +1111,13 @@ export default function BuildingView() {
                       style={{ ...tabStyle(maskTool === tool), padding: '7px 9px', fontSize: '11px' }}>{title}</button>)}
                 </div>
                 <div style={{ fontSize: '11px', color: maskAvailable ? C.textMuted : C.amber }}>
-                  {maskAvailable ? `${maskPoints.length}/64 điểm chỉnh · SAM2 theo nhãn · không huấn luyện tự động` : 'Model mask chưa sẵn sàng. Các nhãn cũ vẫn được giữ.'}
+                  {maskAvailable ? `${maskPoints.length}/64 điểm chỉnh mask · Lưu góc nhìn không giới hạn số lần` : 'Model mask chưa sẵn sàng. Các nhãn cũ vẫn được giữ.'}
+                </div>
+                <div style={{ fontSize: '12px', color: C.textMuted, lineHeight: 1.7 }}>
+                  Cùng một vật: chọn lại đúng nhãn và thêm góc nhìn. Vật khác phải có nhãn khác. Chỉ các mẫu bạn xác nhận được dùng để học; hệ thống không học từ mask tự dự đoán.
+                  <br />Triplet metric: {identityLearning?.training ? 'đang học nền trên GPU' : identityLearning?.revision ? `đang áp dụng phiên bản ${identityLearning.revision}` : 'chờ ít nhất 2 ảnh khác nhau của cùng vật và 1 ảnh của vật khác'}
+                  {` · ${identityLearning?.samples || 0} mẫu đặc trưng riêng biệt`}
+                  {identityLearning?.last_error && <span style={{ color: C.amber }}> · Học chưa hoàn tất: {identityLearning.last_error}</span>}
                 </div>
               </div>}
 
@@ -1127,7 +1143,7 @@ export default function BuildingView() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={{ fontSize: '13px', fontWeight: 800, color: C.textPrimary, fontFamily: 'monospace' }}>{tgt.label}</span>
                               <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: C.accentDim, color: C.accentL, fontWeight: 700, border: `1px solid ${C.accentBorder}` }}>
-                                {(tgt.samples_count || 1) > 1 ? `${tgt.samples_count} góc nhìn` : '1 góc nhìn'}
+                                {`${tgt.samples_count || 1} lần đăng ký · ∞`}
                               </span>
                             </div>
                             <div style={{ fontSize: '11px', color: C.textMuted, marginTop: '3px' }}>
@@ -1141,8 +1157,8 @@ export default function BuildingView() {
                             )}
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
-                            <button type="button" title="Sử dụng mẫu này" onClick={() => handleUseRegisteredTarget(tgt)} style={{ background: C.cyanDim, border: `1px solid ${C.cyanBorder}`, color: C.cyanL, borderRadius: '6px', padding: '7px', cursor: 'pointer', display: 'flex' }}>
-                              <Crop size={14} />
+                            <button type="button" title="Thêm góc nhìn cho cùng vật" onClick={() => handleUseRegisteredTarget(tgt)} style={{ background: C.cyanDim, border: `1px solid ${C.cyanBorder}`, color: C.cyanL, borderRadius: '6px', padding: '7px', cursor: 'pointer', display: 'flex', gap: '5px', alignItems: 'center', fontSize: '11px' }}>
+                              <Plus size={14} /> Góc nhìn
                             </button>
                             <button
                               type="button"

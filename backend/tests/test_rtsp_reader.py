@@ -55,16 +55,37 @@ class LatestFrameReaderTests(unittest.TestCase):
 
             capture.return_value.read.side_effect = read_frame
             reader._capture_frames()
+            self.assertTrue(reader.has_frame())
             available, frame, decoded_at = reader.get_latest_frame_packet()
+            self.assertFalse(reader.has_frame())
             self.assertTrue(available)
             self.assertIs(latest, frame)
             self.assertEqual(100.04, decoded_at)
+            self.assertEqual(2, reader.delivered_frame_id)
+            self.assertEqual(2, reader.status()["decoded_frames"])
+            self.assertEqual(1, reader.status()["replaced_frames"])
+            self.assertEqual(0, reader.status()["read_failures"])
+            self.assertEqual(0, reader.status()["reconnects"])
             self.assertEqual((False, None, None), reader.get_latest_frame_packet())
             reader.frame_queue.put((first, 101.0))
             available, frame = reader.get_latest_frame()
             self.assertTrue(available)
             self.assertIs(first, frame)
             self.assertEqual((False, None), reader.get_latest_frame())
+            reader.stop()
+
+    def test_failed_read_is_counted_separately_from_replaced_frame(self):
+        with mock.patch('core.rtsp_reader.cv2.VideoCapture') as capture, \
+                mock.patch('core.rtsp_reader.threading.Thread'), \
+                mock.patch('core.rtsp_reader.time.sleep') as sleep:
+            reader = RTSPLatestFrameReader('rtsp://test', decoder_threads=1)
+            capture.return_value.isOpened.return_value = True
+            capture.return_value.read.return_value = (False, None)
+            sleep.side_effect = lambda duration: setattr(reader, 'running', False)
+            reader._capture_frames()
+            self.assertEqual(1, reader.status()['read_failures'])
+            self.assertEqual(0, reader.status()['replaced_frames'])
+            self.assertEqual(0, reader.status()['decoded_frames'])
             reader.stop()
 
 

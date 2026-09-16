@@ -2,6 +2,7 @@
 
 import atexit
 import base64
+import hashlib
 import math
 import multiprocessing
 import os
@@ -9,6 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from core.registered_samples import sample_fingerprint
 
 import cv2
 import numpy as np
@@ -107,6 +109,31 @@ class MaskRuntime:
         self.cameras = {}
         self.shared_features = os.getenv("REGISTERED_MASK_SHARED_FEATURES", "1").lower() not in {"0", "false", "no"}
         self.smoothing_alpha = float(os.getenv("REGISTERED_MASK_SMOOTHING_ALPHA", "0.72"))
+        from core.identity_metric import IdentityMetric
+        with open(model_path, "rb") as model_file:
+            signature = f'{hashlib.file_digest(model_file, "sha256").hexdigest()[:16]}:{self.options["imgsz"]}'
+        self.identity = IdentityMetric(os.getenv("REGISTERED_IDENTITY_DIRECTORY", str(Path(__file__).resolve().parents[1] / "data/identity_metric")), model_signature=signature)
+
+    @staticmethod
+    def _identity_descriptor(predictor, bitmap, shape):
+        from core.identity_metric import masked_descriptor
+        features = predictor.vision_feats[-1]
+        features = features.permute(1, 2, 0).reshape(1, -1, *predictor.feat_sizes[-1])
+        return masked_descriptor(features, bitmap, shape, predictor.imgsz)
+
+    def describe(self, frame, mask):
+        import torch
+        from core.identity_metric import masked_descriptor
+        with torch.inference_mode():
+            predictor = self.preview
+            predictor.reset_image()
+            predictor.setup_source(frame)
+            image = predictor.preprocess([frame])
+            backbone = predictor.model.forward_image(image)
+            _, features, _, sizes = predictor.model._prepare_backbone_features(backbone)
+            features = features[-1].permute(1, 2, 0).reshape(1, -1, *sizes[-1])
+            descriptor = masked_descriptor(features, mask_bitmap(mask, frame.shape), frame.shape, image.shape)
+            return descriptor.cpu().tolist()
 
     @staticmethod
     def _bbox_iou(first, second):
@@ -178,6 +205,8 @@ class MaskRuntime:
                 frame = decode_frame(sample["frame_image"])
                 bitmap = mask_bitmap(sample["mask"], frame.shape)
                 predictor(source=frame, masks=bitmap[..., None][None], obj_ids=[0], update_memory=True)
+                descriptor = self._identity_descriptor(predictor, bitmap, frame.shape).detach().cpu().tolist()
+                self.identity.learn(target["label"], cam_id, sample_fingerprint(sample["frame_image"], sample["mask"]), descriptor)
                 entry["seeded"] = True
 
     @contextmanager
@@ -215,6 +244,9 @@ class MaskRuntime:
     def _track_objects(self, frame, entries, seeds):
         observations = {}
         for label, entry in entries.items():
+            diagnostics = entry.setdefault("diagnostics", {"frames": 0, "accepted": 0, "rejections": {}})
+            diagnostics["frames"] += 1
+            diagnostics.update(last_score=None, last_rejection=None)
             predictor = entry["predictor"]
             if not entry["seeded"]:
                 if label not in seeds:
@@ -224,10 +256,24 @@ class MaskRuntime:
                 entry["seeded"] = True
             result = predictor(source=frame)[0]
             if result.masks is None or len(result.boxes) == 0:
+                self._reject(entry, "no_sam_mask")
                 continue
             box = result.boxes[0]
+            diagnostics["last_score"] = float(box.conf.item())
+            if diagnostics["last_score"] <= 0:
+                self._reject(entry, "no_object_presence")
+                continue
+            descriptor = self._identity_descriptor(predictor, result.masks.data[0], frame.shape)
+            verification = self.identity.verify(label, descriptor)
+            diagnostics["identity"] = verification
+            if not verification["accepted"]:
+                self._reject(entry, verification["reason"])
+                entry.pop("shape_distance", None)
+                observations[label] = {"identity_rejected": True, "identity": verification}
+                continue
             binary = result.masks.data[0].cpu().numpy()
             if binary.sum() < 32 or binary.mean() > 0.6:
+                self._reject(entry, "mask_area")
                 continue
             height, width = frame.shape[:2]
             left, top, right, bottom = box.xyxy[0].cpu().tolist()
@@ -235,15 +281,24 @@ class MaskRuntime:
             binary = self._smooth_mask(entry, binary, measured_bbox)
             payload = mask_payload(binary, "sam2_memory", float(box.conf.item()))
             if payload is None:
+                self._reject(entry, "invalid_contour")
                 continue
+            diagnostics["accepted"] += 1
             payload["presence_confidence"] = sam2_presence_confidence(float(box.conf.item()))
             payload["score_type"] = "sam2_positive_object_logit_div32"
+            payload["identity"] = verification
             observations[label] = {
                 "bbox": measured_bbox,
                 "mask": payload,
             }
         return observations
 
+
+    @staticmethod
+    def _reject(entry, reason):
+        diagnostics = entry["diagnostics"]
+        diagnostics["last_rejection"] = reason
+        diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
 
 def _worker(connection, model_path):
     runtime = None
@@ -262,9 +317,22 @@ def _worker(connection, model_path):
                     result = True
                 elif action == "preview":
                     result = runtime.segment(request["frame"], request["bbox"], request.get("points"), request.get("point_labels"))
+                elif action == "describe":
+                    result = runtime.describe(request["frame"], request["mask"])
+                elif action == "learn_identity":
+                    result = runtime.identity.learn(request["label"], request["cam_id"], request["fingerprint"], request["vector"])
+                elif action == "forget_identity":
+                    runtime.identity.forget(request["label"], request.get("cam_id"))
+                    result = runtime.identity.status()
                 else:
                     result = runtime.track(request["cam_id"], request["frame"], request["seeds"])
-                connection.send({"result": result})
+                response = {"result": result, "identity": runtime.identity.status()}
+                if action == "track":
+                    response["diagnostics"] = {
+                        label: entry.get("diagnostics", {})
+                        for label, entry in runtime.cameras.get(request["cam_id"], {}).get("objects", {}).items()
+                    }
+                connection.send(response)
             except Exception as exc:
                 import traceback
                 traceback.print_exc()
@@ -284,6 +352,8 @@ class RegisteredTargetMaskSegmenter:
         self._schedule_lock = threading.Lock()
         self._waiting_cameras = {}
         self._last_slot_at = {}
+        self._camera_diagnostics = {}
+        self._identity_status = {"state": "initializing", "revision": 0, "training": False}
         self._process = None
         self._connection = None
         self._signatures = {}
@@ -308,7 +378,9 @@ class RegisteredTargetMaskSegmenter:
             if now - self._last_slot_at.get(cam_id, -math.inf) >= interval:
                 first_wait = self._waiting_cameras.get(cam_id, (now, now))[0]
                 self._waiting_cameras[cam_id] = (first_wait, now)
-                next_camera = min(self._waiting_cameras, key=lambda camera: self._waiting_cameras[camera][0])
+                next_camera = min(self._waiting_cameras, key=lambda camera: (
+                    self._last_slot_at.get(camera, -math.inf), self._waiting_cameras[camera][0]
+                ))
                 if next_camera == cam_id:
                     acquired = self._lock.acquire(blocking=False)
                     if acquired:
@@ -319,6 +391,10 @@ class RegisteredTargetMaskSegmenter:
         finally:
             if acquired:
                 self._lock.release()
+
+    def cancel_frame_wait(self, cam_id):
+        with self._schedule_lock:
+            self._waiting_cameras.pop(cam_id, None)
 
     def _request(self, **payload):
         if not self.available():
@@ -339,10 +415,24 @@ class RegisteredTargetMaskSegmenter:
             response = self._connection.recv()
             if "error" in response:
                 raise RuntimeError(response["error"])
+            if "diagnostics" in response:
+                self._camera_diagnostics.setdefault(payload["cam_id"], {})["targets"] = response["diagnostics"]
+            if "identity" in response:
+                self._identity_status = response["identity"]
             return response["result"]
 
     def preview(self, frame, bbox, points=None, point_labels=None):
         return self._request(action="preview", frame=frame, bbox=bbox, points=points, point_labels=point_labels)
+
+    def describe(self, frame, mask):
+        return self._request(action="describe", frame=frame, mask=mask)
+
+    def learn_identity(self, label, cam_id, frame_image, mask, vector):
+        return self._request(action="learn_identity", label=label, cam_id=cam_id,
+                             fingerprint=sample_fingerprint(frame_image, mask), vector=vector)
+
+    def forget_identity(self, label, cam_id=None):
+        return self._request(action="forget_identity", label=label, cam_id=cam_id)
 
     def track(self, cam_id, frame, targets, seeds):
         selected = [target for target in targets if eligible_target(target)]
@@ -355,6 +445,10 @@ class RegisteredTargetMaskSegmenter:
         with self._lock:
             try:
                 started = time.monotonic()
+                diagnostics = self._camera_diagnostics.setdefault(cam_id, {})
+                gap_ms = (started - diagnostics.get("last_started_at", started)) * 1000
+                diagnostics.update(last_started_at=started, last_interval_ms=round(gap_ms, 1),
+                                   max_interval_ms=round(max(gap_ms, diagnostics.get("max_interval_ms", 0)), 1))
                 signature = tuple((target["label"], target.get("mask_revision", 0)) for target in selected)
                 if self._process is None or not self._process.is_alive():
                     self._signatures.clear()
@@ -366,6 +460,9 @@ class RegisteredTargetMaskSegmenter:
                 result = self._request(action="track", cam_id=cam_id, frame=frame, seeds=seeds)
                 self.last_error = None
                 self.last_ms = round((time.monotonic() - started) * 1000, 1)
+                diagnostics.update(last_ms=self.last_ms, last_observed_labels=list(result),
+                                   frames=diagnostics.get("frames", 0) + 1,
+                                   empty_frames=diagnostics.get("empty_frames", 0) + int(not result))
                 return result
             except Exception as exc:
                 self.last_error = str(exc)
@@ -380,17 +477,23 @@ class RegisteredTargetMaskSegmenter:
             self._last_slot_at.pop(cam_id, None)
         with self._lock:
             self._signatures.pop(cam_id, None)
+            self._camera_diagnostics.pop(cam_id, None)
             if self._process is not None and self._process.is_alive():
                 try:
                     self._request(action="remove", cam_id=cam_id)
                 except Exception:
                     self.close()
 
-    def status(self):
-        return {"enabled": self.enabled, "available": self.available(), "model": Path(self.model_path).name,
+    def status(self, cam_id=None):
+        status = {"enabled": self.enabled, "available": self.available(), "model": Path(self.model_path).name,
                 "backend": "sam2_registered_memory", "shared_features": self.shared_features,
                 "last_error": self.last_error, "last_ms": self.last_ms,
+                "identity": dict(self._identity_status),
                 "scheduled_cameras": len(self._last_slot_at)}
+        if cam_id is not None:
+            status["camera"] = {key: value for key, value in self._camera_diagnostics.get(cam_id, {}).items()
+                                if key != "last_started_at"}
+        return status
 
     def close(self):
         with self._lock:

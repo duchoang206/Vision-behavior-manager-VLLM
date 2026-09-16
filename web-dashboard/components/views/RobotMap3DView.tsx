@@ -3,8 +3,10 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { createFactoryFloor, createRobotTrail, disposeTwinObject, getFactoryView, updateRobotTrail } from '../../lib/factory-twin-scene';
+import { useTab } from '../TabContext';
+import styles from './RobotMap3DView.module.css';
 import { useLanguage } from '../LanguageContext';
-import { useAppTheme } from '../ThemeContext';
 import {
   Bot,
   User,
@@ -139,15 +141,6 @@ interface FmsLayoutPolygonItem {
   speed_limit_mps?: number;
 }
 
-interface FmsLayoutCamera {
-  id: string;
-  zone?: string;
-  floor?: number;
-  position: Point3;
-  look_at?: Point3;
-  fov_deg?: number;
-  range_m?: number;
-}
 
 interface FmsLayout {
   id: string;
@@ -184,7 +177,6 @@ interface FmsLayout {
   charging_stations?: FmsLayoutPointItem[];
   parking?: FmsLayoutPolygonItem[];
   locations?: FmsLayoutPointItem[];
-  cameras?: FmsLayoutCamera[];
   sensors?: FmsLayoutPointItem[];
   obstacles?: FmsLayoutRectItem[];
 }
@@ -223,26 +215,6 @@ const INITIAL_PERSONS: Record<string, PersonData> = {};
 
 const INITIAL_RACKS: Record<string, RackData> = {};
 
-const DEFAULT_CAMERAS: FmsLayoutCamera[] = [
-  {
-    id: 'Cam 1',
-    zone: 'MAIN',
-    floor: 1,
-    position: [13.8, 1.15, 6.85],
-    look_at: [10.5, 0.0, 11.8],
-    fov_deg: 76,
-    range_m: 8.8,
-  },
-  {
-    id: 'Cam 4',
-    zone: 'MAIN',
-    floor: 1,
-    position: [11.2, 1.15, 15.40],
-    look_at: [15.2, 0.0, 12.0],
-    fov_deg: 78,
-    range_m: 8.2,
-  },
-];
 
 // ─── Motorcycle-Style Analog Speedometer Gauge (Kim gạt từ góc phần 3 bên trái sang đối xứng) ─────────
 interface MotorcycleSpeedometerGaugeProps {
@@ -575,6 +547,7 @@ const mergeStableEntities = <T extends {
   velocity?: number;
   max_speed?: number;
   ui_last_seen?: number;
+  fms_position?: [number, number, number];
 }>(
   prev: Record<string, T>,
   incoming: Record<string, T>,
@@ -599,20 +572,14 @@ const mergeStableEntities = <T extends {
     const allowedJump = Math.max(minJumpMeters, maxSpeed * dtSec * 4.0 + 0.4);
     const shouldHoldPose = Boolean(prevItem && lastSeen && nowMs - lastSeen < UI_POSE_JUMP_WINDOW_MS && dist > allowedJump);
     
-    // Clamp coordinates strictly inside physical SLAM room boundaries
-    const rawPos = shouldHoldPose ? prevItem.position : item.position;
-    const clampedPos: [number, number, number] = [
-      Math.min(Math.max(6.0, rawPos[0]), 22.0),
-      rawPos[1],
-      Math.min(Math.max(9.8, rawPos[2]), 16.2),
-    ];
+    const authoritative = item.fms_position?.every(Number.isFinite) ? item.fms_position : null;
 
     next[id] = {
       ...prevItem,
       ...item,
-      position: clampedPos,
-      heading: shouldHoldPose ? prevItem.heading : item.heading,
-      velocity: shouldHoldPose ? 0 : item.velocity,
+      position: authoritative ?? (shouldHoldPose ? prevItem.position : item.position),
+      heading: shouldHoldPose && !authoritative ? prevItem.heading : item.heading,
+      velocity: shouldHoldPose && !authoritative ? 0 : item.velocity,
       ui_last_seen: nowMs,
     } as T;
   });
@@ -623,8 +590,14 @@ const mergeStableEntities = <T extends {
 // ─── Main Component ─────────────────────────────────────────────────────────
 export default function RobotMap3DView() {
   const { t } = useLanguage();
-  const { theme } = useAppTheme();
-  const isDark = theme !== 'light';
+  const { activeTab } = useTab();
+  const isDark = true;
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const [showFleet, setShowFleet] = useState(true);
+  const [showInspector, setShowInspector] = useState(false);
+  const [telemetryConnected, setTelemetryConnected] = useState(false);
+  const lastTelemetryAt = useRef(0);
 
   // Multi-Entity Telemetry States (Populated with full FMS fleet by default)
   const [robots, setRobots] = useState<Record<string, RobotData>>(INITIAL_ROBOTS);
@@ -639,9 +612,9 @@ export default function RobotMap3DView() {
   const [showLabels] = useState<boolean>(true);
 
   const [kpi, setKpi] = useState<FleetKpi>({
-    total: 3,
-    active: 2,
-    charging: 1,
+    total: 0,
+    active: 0,
+    charging: 0,
     idle: 0,
     warning: 0,
     error: 0,
@@ -650,15 +623,15 @@ export default function RobotMap3DView() {
   });
 
   const [fmsMeta, setFmsMeta] = useState<FmsMeta>({
-    server_ip: '192.168.5.104',
-    mqtt_connected: true,
+    server_ip: '',
+    mqtt_connected: false,
     last_packet_time: 0,
     total_packets: 0,
-    mode: 'LIVE',
+    mode: 'CONNECTING',
   });
 
   const [layout, setLayout] = useState<FmsLayout | null>(null);
-  const [packetRate, setPacketRate] = useState<number>(15);
+  const [packetRate, setPacketRate] = useState<number>(0);
 
   // References for Three.js
   const mountRef = useRef<HTMLDivElement>(null);
@@ -669,6 +642,7 @@ export default function RobotMap3DView() {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
+  const trailsRef = useRef(new Map<string, ReturnType<typeof createRobotTrail>>());
 
   // Mesh registries for ultra-fast 60 FPS update with in-place canvas redraw
   const robotMeshesRef = useRef<Map<string, {
@@ -740,12 +714,37 @@ export default function RobotMap3DView() {
 
   const handleResetCamera = useCallback(() => {
     if (!cameraRef.current || !controlsRef.current) return;
-    const { centerX, centerZ } = layoutFrame;
-    cameraRef.current.position.set(centerX, 15.5, centerZ + 12.5);
+    const { centerX, centerZ, span } = getFactoryView(layout);
+    const distance = span * Math.max(1, 1.3 / cameraRef.current.aspect);
+    cameraRef.current.position.set(centerX + distance * 0.53, distance * 0.72, centerZ + distance * 0.66);
     controlsRef.current.target.set(centerX, 0, centerZ);
     controlsRef.current.update();
     setFollowTarget(false);
-  }, [layoutFrame]);
+  }, [layout]);
+
+  useEffect(() => { handleResetCamera(); }, [handleResetCamera, viewMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let controller: AbortController | null = null;
+    const pollStatus = async () => {
+      controller = new AbortController();
+      const timeout = setTimeout(() => controller?.abort(), 2500);
+      try {
+        const response = await fetch('/api/backend/fms/status', { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error('FMS status unavailable');
+        const status = await response.json();
+        if (!cancelled) setFmsMeta({ ...status, server_ip: status.fms_ip });
+      } catch {
+        if (!cancelled) setFmsMeta(previous => ({ ...previous, mqtt_connected: false, mode: 'CONNECTING' }));
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    void pollStatus();
+    const interval = setInterval(pollStatus, 3000);
+    return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
+  }, []);
 
   // ─── FMS Layout Loader ────────────────────────────────────────────────────
   useEffect(() => {
@@ -773,11 +772,13 @@ export default function RobotMap3DView() {
 
   // ─── WebSocket Connection for 3D Digital Twin (Robots, Persons, Racks) ────
   useEffect(() => {
+    let disposed = false;
     let ws: WebSocket | null = null;
     let reconnectTimeout: NodeJS.Timeout | null = null;
     let rateInterval: NodeJS.Timeout | null = null;
 
     const connect = () => {
+      if (disposed) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.hostname || 'localhost';
       const wsUrl = `${protocol}//${host}:8000/ws/digital_twin`;
@@ -785,7 +786,7 @@ export default function RobotMap3DView() {
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        setFmsMeta(prev => ({ ...prev, mode: 'LIVE', mqtt_connected: true }));
+        setTelemetryConnected(false);
       };
 
       ws.onmessage = (event) => {
@@ -793,6 +794,8 @@ export default function RobotMap3DView() {
           packetCountRef.current++;
           const msg = JSON.parse(event.data);
           const nowMs = Date.now();
+          lastTelemetryAt.current = nowMs;
+          setTelemetryConnected(true);
 
           if (msg.type === 'DIGITAL_TWIN_SYNC' || msg.type === 'DIGITAL_TWIN_TELEMETRY') {
             if (msg.robots) {
@@ -845,8 +848,8 @@ export default function RobotMap3DView() {
 
       ws.onerror = () => {};
       ws.onclose = () => {
-        setFmsMeta(prev => ({ ...prev, mode: 'CONNECTING', mqtt_connected: false }));
-        reconnectTimeout = setTimeout(connect, 2500);
+        setTelemetryConnected(false);
+        if (!disposed) reconnectTimeout = setTimeout(connect, 1500);
       };
 
       wsRef.current = ws;
@@ -857,9 +860,11 @@ export default function RobotMap3DView() {
     rateInterval = setInterval(() => {
       setPacketRate(packetCountRef.current);
       packetCountRef.current = 0;
+      if (Date.now() - lastTelemetryAt.current > 3000) setTelemetryConnected(false);
     }, 1000);
 
     return () => {
+      disposed = true;
       if (ws) ws.close();
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
       if (rateInterval) clearInterval(rateInterval);
@@ -875,65 +880,30 @@ export default function RobotMap3DView() {
     status: string,
     carriedRack?: string | null,
     crossStatus?: string,
-    deltaM?: number | null
+    deltaM?: number | null,
+    velocity = 0
   ) => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const isDeviated = crossStatus === 'DEVIATED';
-    const isChargingVer = crossStatus === 'CHARGING_VERIFIED';
-    const isOffline = status === 'OFFLINE';
-
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-    ctx.strokeStyle = isOffline
-      ? '#64748b'
-      : isDeviated
-      ? '#ef4444'
-      : isChargingVer
-      ? '#eab308'
-      : status === 'CARRYING_RACK'
-      ? '#a855f7'
-      : status === 'CHARGING'
-      ? '#f59e0b'
-      : status === 'ERROR'
-      ? '#ef4444'
-      : (status === 'RUNNING' || status === 'ACTIVE')
-      ? '#22c55e'
-      : '#0284c7';
-    ctx.lineWidth = 4;
+    const accent = status === 'OFFLINE' ? '#78939a' : status === 'CHARGING' ? '#f6c76a' : status === 'ERROR' ? '#fb8d7b' : '#65eadd';
+    ctx.fillStyle = 'rgba(5, 23, 29, 0.94)';
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.roundRect(6, 6, 288, 113, 14);
+    ctx.roundRect(3, 3, canvas.width - 6, canvas.height - 6, 8);
     ctx.fill();
     ctx.stroke();
-
-    // Line 1: Robot ID + FMS Status
-    ctx.fillStyle = isOffline ? '#94a3b8' : '#ffffff';
-    ctx.font = 'bold 24px "Space Grotesk", sans-serif';
-    ctx.fillText(`🤖 ${id}`, 18, 38);
-
-    // Line 2: Battery + FMS Mode
-    const batColor = isOffline ? '#94a3b8' : battery > 50 ? '#22c55e' : battery > 20 ? '#f59e0b' : '#ef4444';
-    ctx.fillStyle = batColor;
-    ctx.font = 'bold 18px monospace';
-    ctx.fillText(`⚡ ${battery}%`, 18, 70);
-
-    ctx.fillStyle = isOffline ? '#94a3b8' : carriedRack ? '#c084fc' : ((status === 'RUNNING' || status === 'ACTIVE') ? '#22c55e' : status === 'CHARGING' ? '#fbbf24' : status === 'ERROR' ? '#ef4444' : '#38bdf8');
-    ctx.font = 'bold 15px "Space Grotesk", sans-serif';
-    const fmsLabelText = isOffline ? '⚪ OFFLINE' : status === 'CHARGING' ? '🔌 ĐANG SẠC' : status === 'ERROR' ? '🚨 LỖI' : carriedRack ? `📦 ${carriedRack}` : (status === 'RUNNING' || status === 'ACTIVE') ? '🟢 RUNNING' : '🔵 IDLE';
-    ctx.fillText(fmsLabelText, 115, 70);
-
-    // Line 3: Vision AI Cross-check status
-    ctx.fillStyle = isOffline ? '#94a3b8' : isDeviated ? '#f87171' : isChargingVer ? '#fef08a' : '#67e8f9';
-    ctx.font = 'bold 14px "Space Grotesk", sans-serif';
-    const crossLabel = isOffline
-      ? '⚪ Mất kết nối FMS'
-      : isChargingVer
-      ? '🎯 Vision: Đúng trạm sạc'
-      : isDeviated
-      ? `⚠ Vision: Lệch ${deltaM ?? 0}m`
-      : deltaM !== null && deltaM !== undefined
-      ? `🎯 Vision: Khớp (${deltaM}m)`
-      : '📡 Nguồn: FMS Only';
-    ctx.fillText(crossLabel, 18, 102);
+    ctx.fillStyle = accent;
+    ctx.fillRect(3, 15, 3, 26);
+    ctx.fillStyle = '#e3f5f3';
+    ctx.font = '600 22px sans-serif';
+    ctx.fillText(id, 18, 32);
+    ctx.fillStyle = '#8fb8bb';
+    ctx.font = '16px monospace';
+    ctx.fillText(`BAT ${battery}%  |  ${Math.max(0, velocity).toFixed(2)} m/s`, 18, 57);
+    ctx.fillStyle = accent;
+    ctx.font = '12px monospace';
+    ctx.fillText(`FMS / ${status}`, 18, 77);
   };
 
   const createRobotLabelSprite = (
@@ -942,13 +912,14 @@ export default function RobotMap3DView() {
     status: string,
     carriedRack?: string | null,
     crossStatus?: string,
-    deltaM?: number | null
+    deltaM?: number | null,
+    velocity = 0
   ) => {
     const canvas = document.createElement('canvas');
     canvas.width = 280;
-    canvas.height = 115;
+    canvas.height = 88;
     const ctx = canvas.getContext('2d')!;
-    updateRobotLabelCanvas(canvas, ctx, id, battery, status, carriedRack, crossStatus, deltaM);
+    updateRobotLabelCanvas(canvas, ctx, id, battery, status, carriedRack, crossStatus, deltaM, velocity);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
@@ -956,7 +927,7 @@ export default function RobotMap3DView() {
     texture.needsUpdate = true;
     const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(1.9, 0.78, 1);
+    sprite.scale.set(2.1, 0.66, 1);
     sprite.position.set(0, 1.35, 0);
     return { sprite, canvas, ctx, texture };
   };
@@ -1054,17 +1025,12 @@ export default function RobotMap3DView() {
     const mountEl = mountRef.current;
     const width = mountEl.clientWidth || 800;
     const height = mountEl.clientHeight || 600;
-    const {
-      centerX,
-      centerZ,
-      gridSize,
-      gridDivisions,
-    } = layoutFrame;
+    const { centerX, centerZ, span: gridSize } = getFactoryView(layout);
 
     // 1. Scene & Camera
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(isDark ? '#090a0f' : '#f0f5fa');
-    scene.fog = new THREE.Fog(isDark ? '#090a0f' : '#f0f5fa', gridSize * 1.5, gridSize * 4.5);
+    scene.background = new THREE.Color('#061117');
+    scene.fog = new THREE.Fog('#061117', gridSize * 2, gridSize * 5);
     sceneRef.current = scene;
 
     // Dedicated groups for layout and dynamic entities
@@ -1077,15 +1043,15 @@ export default function RobotMap3DView() {
     entitiesGroupRef.current = entitiesGroup;
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(centerX, 15.5, centerZ + 12.5);
+    const distance = gridSize * Math.max(1, 1.3 / camera.aspect);
+    camera.position.set(centerX + distance * 0.53, distance * 0.72, centerZ + distance * 0.66);
     cameraRef.current = camera;
 
     // 2. Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = false;
     rendererRef.current = renderer;
     mountEl.appendChild(renderer.domElement);
 
@@ -1100,43 +1066,14 @@ export default function RobotMap3DView() {
     controlsRef.current = controls;
 
     // 4. Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, isDark ? 1.6 : 2.0);
+    const ambientLight = new THREE.HemisphereLight(0xa9e7ed, 0x0b2028, 2.1);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, isDark ? 2.2 : 2.6);
+    const dirLight = new THREE.DirectionalLight(0xc3edee, 2.4);
     dirLight.position.set(centerX + 12, 24, centerZ + 12);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
+    dirLight.castShadow = false;
     scene.add(dirLight);
 
-    // 5. Grid Helper (Lưới ô vuông chuẩn xác 0.5m / ô)
-    const gridDiv = Math.max(52, gridDivisions);
-    const gridHelper = new THREE.GridHelper(
-      gridSize,
-      gridDiv,
-      isDark ? 0x0284c7 : 0x38bdf8,
-      isDark ? 0x1e293b : 0xdbeafe
-    );
-    gridHelper.position.set(centerX, 0.001, centerZ);
-    scene.add(gridHelper);
-
-    // 5B. Central Coordinate Axes
-    const axisMat = new THREE.LineBasicMaterial({
-      color: isDark ? 0x06b6d4 : 0x0284c7,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const axisXGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(centerX - gridSize * 0.75, 0.003, centerZ),
-      new THREE.Vector3(centerX + gridSize * 0.75, 0.003, centerZ),
-    ]);
-    const axisZGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(centerX, 0.003, centerZ - gridSize * 0.4),
-      new THREE.Vector3(centerX, 0.003, centerZ + gridSize * 0.4),
-    ]);
-    scene.add(new THREE.Line(axisXGeo, axisMat));
-    scene.add(new THREE.Line(axisZGeo, axisMat));
 
     // 6. Raycaster for Interactive Entity Selection
     const raycaster = new THREE.Raycaster();
@@ -1161,6 +1098,7 @@ export default function RobotMap3DView() {
           current = current.parent;
         }
         if (current) {
+          setShowInspector(true);
           if (current.userData.robotId) {
             setSelectedEntity({ type: 'robot', id: current.userData.robotId });
             setFleetTab('robots');
@@ -1192,20 +1130,26 @@ export default function RobotMap3DView() {
     resizeObserver.observe(mountEl);
 
     // 8. 60 FPS LERP Smoothing Animation Loop
-    const animate = () => {
+    let lastRenderAt = 0;
+    const animate = (timestamp = 0) => {
       animFrameIdRef.current = requestAnimationFrame(animate);
+      if (document.hidden || activeTabRef.current !== 'robot_map' || mountEl.clientWidth < 10) return;
+      if (timestamp - lastRenderAt < 1000 / 30) return;
+      const elapsed = Math.min(0.1, (timestamp - lastRenderAt) / 1000);
+      lastRenderAt = timestamp;
+      const smoothing = 1 - Math.exp(-18 * elapsed);
       controls.update();
 
       // A. Robots Animation
       robotMeshesRef.current.forEach((meshData, rid) => {
         const { group, targetPos, targetHeading, pulseRing } = meshData;
-        group.position.x += (targetPos.x - group.position.x) * 0.18;
-        group.position.z += (targetPos.z - group.position.z) * 0.18;
+        group.position.x += (targetPos.x - group.position.x) * smoothing;
+        group.position.z += (targetPos.z - group.position.z) * smoothing;
 
         let deltaHeading = targetHeading - group.rotation.y;
         while (deltaHeading > Math.PI) deltaHeading -= 2 * Math.PI;
         while (deltaHeading < -Math.PI) deltaHeading += 2 * Math.PI;
-        group.rotation.y += deltaHeading * 0.18;
+        group.rotation.y += deltaHeading * smoothing;
 
         const isSelected = selectedEntityRef.current?.type === 'robot' && selectedEntityRef.current?.id === rid;
         pulseRing.visible = isSelected;
@@ -1261,11 +1205,19 @@ export default function RobotMap3DView() {
     return () => {
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
       resizeObserver.disconnect();
+      controls.dispose();
+      disposeTwinObject(entitiesGroup);
+      trailsRef.current.forEach(trail => { scene.remove(trail.line); disposeTwinObject(trail.line); });
+      trailsRef.current.clear();
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       if (renderer.domElement.parentElement === mountEl) {
         mountEl.removeChild(renderer.domElement);
       }
       renderer.dispose();
+      rendererRef.current = null;
+      sceneRef.current = null;
+      cameraRef.current = null;
+      controlsRef.current = null;
       robotMeshesRef.current.clear();
       personMeshesRef.current.clear();
       rackMeshesRef.current.clear();
@@ -1274,629 +1226,16 @@ export default function RobotMap3DView() {
     };
   }, [viewMode, isDark]);
 
-  // ─── Build / Update Layout Layer (SLAM Floor, Walkways, Waypoints, Stations, Charging Stations, SLAM Walls) ───
   useEffect(() => {
-    if (viewMode !== '3D' || !layoutGroupRef.current) return;
-    const layoutGroup = layoutGroupRef.current;
-
-    // Clear previous layout children cleanly
-    while (layoutGroup.children.length > 0) {
-      const child = layoutGroup.children[0];
-      layoutGroup.remove(child);
-      if ((child as THREE.Mesh).geometry) {
-        (child as THREE.Mesh).geometry.dispose();
-      }
-    }
-
-    const [slamX1, slamZ1, slamX2, slamZ2] = slamMapRect;
-
-    // A. SLAM LiDAR Floor Texture Overlay (Khớp chuẩn 1:1 với tọa độ SLAM)
-    const createHorizontalPlaneGeometry = (x1: number, z1: number, x2: number, z2: number, y = 0.004) => {
-      const geometry = new THREE.BufferGeometry();
-      const vertices = new Float32Array([
-        x1, y, z1,
-        x2, y, z1,
-        x1, y, z2,
-        x2, y, z2,
-      ]);
-      const uvs = new Float32Array([
-        0, 1,
-        1, 1,
-        0, 0,
-        1, 0,
-      ]);
-      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-      geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-      geometry.setIndex([0, 2, 1, 2, 3, 1]);
-      geometry.computeVertexNormals();
-      return geometry;
+    const parent = layoutGroupRef.current;
+    if (viewMode !== '3D' || !parent) return;
+    const floor = createFactoryFloor(layout);
+    parent.add(floor);
+    return () => {
+      parent.remove(floor);
+      disposeTwinObject(floor);
     };
-
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(slamMapHref, (tex) => {
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.flipY = true;
-      tex.anisotropy = 8;
-      tex.needsUpdate = true;
-      const overlayGeo = createHorizontalPlaneGeometry(slamX1, slamZ1, slamX2, slamZ2, 0.004);
-      const overlayMat = new THREE.MeshBasicMaterial({
-        map: tex,
-        transparent: true,
-        opacity: isDark ? 0.35 : 0.25,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-      });
-      const overlayMesh = new THREE.Mesh(overlayGeo, overlayMat);
-      layoutGroup.add(overlayMesh);
-    });
-
-    // B. Smooth Continuous 3D Walkways (Mạng lưới đường chạy FMS mượt mà)
-    const trackColor = isDark ? 0x1e293b : 0xe2e8f0;
-    const trackMat = new THREE.MeshStandardMaterial({
-      color: trackColor,
-      roughness: 0.4,
-      metalness: 0.15,
-      side: THREE.DoubleSide,
-    });
-
-    (layout?.walkways ?? []).forEach((w) => {
-      if (!w.polygon || w.polygon.length < 3) return;
-      const shape = new THREE.Shape();
-      shape.moveTo(w.polygon[0][0], w.polygon[0][1]);
-      w.polygon.slice(1).forEach(([x, z]) => shape.lineTo(x, z));
-      shape.closePath();
-      const geom = new THREE.ShapeGeometry(shape);
-      const mesh = new THREE.Mesh(geom, trackMat);
-      mesh.rotation.x = Math.PI / 2;
-      mesh.position.y = 0.006;
-      mesh.receiveShadow = true;
-      layoutGroup.add(mesh);
-    });
-
-    // C. FMS Waypoints 3D (Các điểm nút tròn nhỏ gọn, cân đối đúng chuẩn FMS)
-    (layout?.locations ?? []).forEach((loc) => {
-      const pt = getItemPoint(loc);
-      if (!pt) return;
-      const isChargingPt = loc.kind === 'CHARGING' || loc.id.toLowerCase().includes('charge') || loc.id === 'AutoXing';
-      const isStationEnd = loc.id.startsWith('19') && (pt[1] > 14.5 || loc.id.includes('AXP'));
-      
-      const dotGeo = new THREE.CylinderGeometry(0.07, 0.07, 0.012, 24);
-      const dotMat = new THREE.MeshStandardMaterial({
-        color: isChargingPt ? 0xf59e0b : isStationEnd ? 0x0284c7 : 0x16a34a,
-        emissive: isChargingPt ? 0xd97706 : isStationEnd ? 0x0369a1 : 0x15803d,
-        emissiveIntensity: 0.6,
-        roughness: 0.3
-      });
-      const dot = new THREE.Mesh(dotGeo, dotMat);
-      dot.position.set(pt[0], 0.010, pt[1]);
-      layoutGroup.add(dot);
-
-      // White center inner dot
-      const centerDotGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.014, 16);
-      const centerDot = new THREE.Mesh(centerDotGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
-      centerDot.position.set(pt[0], 0.011, pt[1]);
-      layoutGroup.add(centerDot);
-    });
-
-    // D. Work Stations 3D (Trạm làm việc xanh lá FMS)
-    (layout?.stations ?? []).forEach((st) => {
-      const w = st.rect[2] - st.rect[0];
-      const d = st.rect[3] - st.rect[1];
-      const cx = (st.rect[0] + st.rect[2]) / 2;
-      const cz = (st.rect[1] + st.rect[3]) / 2;
-      const stMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(w, 0.02, d),
-        new THREE.MeshStandardMaterial({
-          color: 0x10b981,
-          emissive: 0x059669,
-          emissiveIntensity: 0.2,
-          transparent: true,
-          opacity: 0.55,
-          roughness: 0.4
-        })
-      );
-      stMesh.position.set(cx, 0.014, cz);
-      layoutGroup.add(stMesh);
-    });
-
-    // E. Dynamic Real Charging Stations from FMS layout
-    (layout?.charging_stations ?? []).forEach((cs) => {
-      const csGroup = new THREE.Group();
-      const posX = cs.position?.[0] ?? cs.access_point?.[0] ?? 0;
-      const posZ = cs.position?.[2] ?? cs.access_point?.[1] ?? 0;
-      csGroup.position.set(posX, 0, posZ);
-
-      // Floor metallic charging base plate
-      const basePad = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.38, 0.40, 0.02, 32),
-        new THREE.MeshStandardMaterial({
-          color: 0x0f172a,
-          roughness: 0.35,
-          metalness: 0.8,
-        })
-      );
-      basePad.position.y = 0.01;
-      csGroup.add(basePad);
-
-      // Amber glowing charging contact ring
-      const chargingRing = new THREE.Mesh(
-        new THREE.RingGeometry(0.14, 0.26, 32),
-        new THREE.MeshStandardMaterial({
-          color: 0xf59e0b,
-          emissive: 0xd97706,
-          emissiveIntensity: 0.9,
-          side: THREE.DoubleSide
-        })
-      );
-      chargingRing.rotation.x = -Math.PI / 2;
-      chargingRing.position.y = 0.021;
-      csGroup.add(chargingRing);
-
-      // Industrial Charging Pillar
-      const pillar = new THREE.Mesh(
-        new THREE.BoxGeometry(0.20, 0.65, 0.14),
-        new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.7 })
-      );
-      pillar.position.set(0, 0.33, -0.22);
-      csGroup.add(pillar);
-
-      // Pillar Top Screen / Status Indicator
-      const screen = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.12, 0.02),
-        new THREE.MeshStandardMaterial({
-          color: 0x38bdf8,
-          emissive: 0x0284c7,
-          emissiveIntensity: 1.2
-        })
-      );
-      screen.position.set(0, 0.52, -0.14);
-      csGroup.add(screen);
-
-      // Floating 3D Text Badge with Station Name (e.g. "⚡ AutoXing" / "⚡ 199953TT202049")
-      const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 96;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-        ctx.beginPath();
-        ctx.roundRect(4, 4, 312, 88, 16);
-        ctx.fill();
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = '#f59e0b';
-        ctx.stroke();
-
-        ctx.font = 'bold 28px "Space Grotesk", sans-serif';
-        ctx.fillStyle = '#fbbf24';
-        ctx.textAlign = 'center';
-        ctx.fillText(`⚡ ${cs.id}`, 160, 56);
-      }
-      const badgeTex = new THREE.CanvasTexture(canvas);
-      badgeTex.needsUpdate = true;
-      const badgeMat = new THREE.SpriteMaterial({ map: badgeTex, transparent: true, depthWrite: false });
-      const badgeSprite = new THREE.Sprite(badgeMat);
-      badgeSprite.position.set(0, 0.95, -0.1);
-      badgeSprite.scale.set(0.95, 0.28, 1);
-      csGroup.add(badgeSprite);
-
-      layoutGroup.add(csGroup);
-    });
-
-    // F. Solid 3D Walls Extruded on ALL SLAM LiDAR Scanned Walls
-    const slamWallSegs = (layout?.slam_walls ?? []).filter(([p1, p2]) => {
-      const dx = p2[0] - p1[0];
-      const dz = p2[1] - p1[1];
-      return Math.hypot(dx, dz) > 0.002;
-    });
-
-    if (slamWallSegs.length > 0) {
-      const wallHeight = 1.25;
-      const wallThickness = 0.14; // Perfectly covers all underlying SLAM LiDAR map marks
-      const halfThick = wallThickness / 2;
-
-      const segCount = slamWallSegs.length;
-      const vertexCount = segCount * 8;
-      const faceCount = segCount * 12;
-
-      const positions = new Float32Array(vertexCount * 3);
-      const indices = new Uint32Array(faceCount * 3);
-      const topEdgePositions = new Float32Array(segCount * 12);
-      const baseEdgePositions = new Float32Array(segCount * 12);
-
-      let vIdx = 0;
-      let iIdx = 0;
-      let topEdgeIdx = 0;
-      let baseEdgeIdx = 0;
-
-      slamWallSegs.forEach((seg) => {
-        const [p1, p2] = seg;
-        const x1 = p1[0], z1 = p1[1];
-        const x2 = p2[0], z2 = p2[1];
-        const dx = x2 - x1;
-        const dz = z2 - z1;
-        const len = Math.hypot(dx, dz);
-        if (len < 0.002) return;
-        const nx = (-dz / len) * halfThick;
-        const nz = (dx / len) * halfThick;
-
-        const baseV = vIdx / 3;
-
-        // Base 4 vertices (y = 0)
-        positions[vIdx++] = x1 + nx; positions[vIdx++] = 0.0; positions[vIdx++] = z1 + nz; // 0
-        positions[vIdx++] = x1 - nx; positions[vIdx++] = 0.0; positions[vIdx++] = z1 - nz; // 1
-        positions[vIdx++] = x2 - nx; positions[vIdx++] = 0.0; positions[vIdx++] = z2 - nz; // 2
-        positions[vIdx++] = x2 + nx; positions[vIdx++] = 0.0; positions[vIdx++] = z2 + nz; // 3
-
-        // Top 4 vertices (y = H)
-        positions[vIdx++] = x1 + nx; positions[vIdx++] = wallHeight; positions[vIdx++] = z1 + nz; // 4
-        positions[vIdx++] = x1 - nx; positions[vIdx++] = wallHeight; positions[vIdx++] = z1 - nz; // 5
-        positions[vIdx++] = x2 - nx; positions[vIdx++] = wallHeight; positions[vIdx++] = z2 - nz; // 6
-        positions[vIdx++] = x2 + nx; positions[vIdx++] = wallHeight; positions[vIdx++] = z2 + nz; // 7
-
-        // 12 Triangles (6 Faces)
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 3; indices[iIdx++] = baseV + 7;
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 7; indices[iIdx++] = baseV + 4;
-
-        indices[iIdx++] = baseV + 1; indices[iIdx++] = baseV + 5; indices[iIdx++] = baseV + 6;
-        indices[iIdx++] = baseV + 1; indices[iIdx++] = baseV + 6; indices[iIdx++] = baseV + 2;
-
-        indices[iIdx++] = baseV + 4; indices[iIdx++] = baseV + 7; indices[iIdx++] = baseV + 6;
-        indices[iIdx++] = baseV + 4; indices[iIdx++] = baseV + 6; indices[iIdx++] = baseV + 5;
-
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 1; indices[iIdx++] = baseV + 2;
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 2; indices[iIdx++] = baseV + 3;
-
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 4; indices[iIdx++] = baseV + 5;
-        indices[iIdx++] = baseV + 0; indices[iIdx++] = baseV + 5; indices[iIdx++] = baseV + 1;
-
-        indices[iIdx++] = baseV + 3; indices[iIdx++] = baseV + 2; indices[iIdx++] = baseV + 6;
-        indices[iIdx++] = baseV + 3; indices[iIdx++] = baseV + 6; indices[iIdx++] = baseV + 7;
-
-        // Top edge lines
-        topEdgePositions[topEdgeIdx++] = x1 + nx; topEdgePositions[topEdgeIdx++] = wallHeight; topEdgePositions[topEdgeIdx++] = z1 + nz;
-        topEdgePositions[topEdgeIdx++] = x2 + nx; topEdgePositions[topEdgeIdx++] = wallHeight; topEdgePositions[topEdgeIdx++] = z2 + nz;
-        topEdgePositions[topEdgeIdx++] = x1 - nx; topEdgePositions[topEdgeIdx++] = wallHeight; topEdgePositions[topEdgeIdx++] = z1 - nz;
-        topEdgePositions[topEdgeIdx++] = x2 - nx; topEdgePositions[topEdgeIdx++] = wallHeight; topEdgePositions[topEdgeIdx++] = z2 - nz;
-
-        // Base edge lines
-        baseEdgePositions[baseEdgeIdx++] = x1 + nx; baseEdgePositions[baseEdgeIdx++] = 0.01; baseEdgePositions[baseEdgeIdx++] = z1 + nz;
-        baseEdgePositions[baseEdgeIdx++] = x2 + nx; baseEdgePositions[baseEdgeIdx++] = 0.01; baseEdgePositions[baseEdgeIdx++] = z2 + nz;
-        baseEdgePositions[baseEdgeIdx++] = x1 - nx; baseEdgePositions[baseEdgeIdx++] = 0.01; baseEdgePositions[baseEdgeIdx++] = z1 - nz;
-        baseEdgePositions[baseEdgeIdx++] = x2 - nx; baseEdgePositions[baseEdgeIdx++] = 0.01; baseEdgePositions[baseEdgeIdx++] = z2 - nz;
-      });
-
-      const wallGeo = new THREE.BufferGeometry();
-      wallGeo.setAttribute('position', new THREE.BufferAttribute(positions.slice(0, vIdx), 3));
-      wallGeo.setIndex(new THREE.BufferAttribute(indices.slice(0, iIdx), 1));
-      wallGeo.computeVertexNormals();
-
-      const wallMat = new THREE.MeshStandardMaterial({
-        color: isDark ? 0x1e3a8a : 0x2563eb,
-        emissive: isDark ? 0x172554 : 0x1d4ed8,
-        emissiveIntensity: 0.4,
-        roughness: 0.3,
-        metalness: 0.4,
-        side: THREE.DoubleSide,
-      });
-      const wallMesh = new THREE.Mesh(wallGeo, wallMat);
-      wallMesh.castShadow = true;
-      wallMesh.receiveShadow = true;
-      layoutGroup.add(wallMesh);
-
-      // Top glowing rim line
-      const topGeo = new THREE.BufferGeometry();
-      topGeo.setAttribute('position', new THREE.BufferAttribute(topEdgePositions.slice(0, topEdgeIdx), 3));
-      const topMat = new THREE.LineBasicMaterial({
-        color: isDark ? 0x60a5fa : 0x3b82f6,
-        transparent: true,
-        opacity: 0.9,
-      });
-      layoutGroup.add(new THREE.LineSegments(topGeo, topMat));
-
-      // Base glowing line
-      const baseGeo = new THREE.BufferGeometry();
-      baseGeo.setAttribute('position', new THREE.BufferAttribute(baseEdgePositions.slice(0, baseEdgeIdx), 3));
-      const baseMat = new THREE.LineBasicMaterial({
-        color: isDark ? 0x38bdf8 : 0x1d4ed8,
-        transparent: true,
-        opacity: 0.5,
-      });
-      layoutGroup.add(new THREE.LineSegments(baseGeo, baseMat));
-    }
-
-    // G. Ultra-Realistic 3D Wall-Mounted CCTV Cameras with Strict Blue-Wall Interior FOV Frustums
-    const rawCameras = (layout?.cameras && layout.cameras.length > 0) ? layout.cameras : DEFAULT_CAMERAS;
-
-    // Strict physical interior boundaries of the blue SLAM room
-    const ROOM_X_MIN = 6.30;
-    const ROOM_X_MAX = 21.80;
-    const ROOM_Z_MIN = 6.92;
-    const ROOM_Z_MAX = 15.38;
-    const FLOOR_Y = 0.02;
-
-    rawCameras.forEach((cam, camIdx) => {
-      const isCam1 = cam.id.toLowerCase().includes('1') || camIdx === 0;
-      const camX = cam.position[0];
-      const camY = cam.position[1] ?? 1.15;
-      const camZ = cam.position[2];
-      const lookAtX = cam.look_at ? cam.look_at[0] : (isCam1 ? 10.5 : 15.2);
-      const lookAtY = cam.look_at ? cam.look_at[1] : 0.0;
-      const lookAtZ = cam.look_at ? cam.look_at[2] : (isCam1 ? 11.8 : 12.0);
-      const fovDeg = cam.fov_deg ?? (isCam1 ? 76 : 78);
-      const rangeM = cam.range_m ?? (isCam1 ? 8.8 : 8.2);
-      const themeColor = isCam1 ? 0x22d3ee : 0x818cf8; // Cyan for Cam 1, Indigo for Cam 4
-      const hexColorStr = isCam1 ? '#22d3ee' : '#818cf8';
-
-      const camGroup = new THREE.Group();
-      camGroup.position.set(camX, camY, camZ);
-
-      // 1. Industrial Wall Mounting Backplate (Gắn trực tiếp trên bề mặt tường xanh)
-      const wallPlateGeo = new THREE.BoxGeometry(0.18, 0.18, 0.04);
-      const wallPlateMat = new THREE.MeshStandardMaterial({
-        color: 0x1e293b,
-        metalness: 0.85,
-        roughness: 0.25,
-      });
-      const wallPlate = new THREE.Mesh(wallPlateGeo, wallPlateMat);
-      wallPlate.position.set(0, 0, isCam1 ? -0.02 : 0.02);
-      camGroup.add(wallPlate);
-
-      // 2. Heavy-Duty Cantilever Wall Extension Arm (Vươn ngang từ tường)
-      const armLength = 0.18;
-      const armGeo = new THREE.CylinderGeometry(0.016, 0.016, armLength, 12);
-      const armMat = new THREE.MeshStandardMaterial({
-        color: 0x475569,
-        metalness: 0.9,
-        roughness: 0.2,
-      });
-      const arm = new THREE.Mesh(armGeo, armMat);
-      arm.rotation.x = Math.PI / 2;
-      arm.position.set(0, 0, isCam1 ? armLength / 2 : -armLength / 2);
-      camGroup.add(arm);
-
-      // 3. Articulated Swivel Joint & Aiming Head
-      const swivelGeo = new THREE.SphereGeometry(0.032, 12, 12);
-      const swivelMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8, roughness: 0.3 });
-      const swivel = new THREE.Mesh(swivelGeo, swivelMat);
-      const swivelZ = isCam1 ? armLength : -armLength;
-      swivel.position.set(0, 0, swivelZ);
-      camGroup.add(swivel);
-
-      // 4. Camera Aiming Group
-      const aimGroup = new THREE.Group();
-      aimGroup.position.set(0, 0, swivelZ);
-      const lookTarget = new THREE.Vector3(lookAtX, lookAtY, lookAtZ);
-      const camWorldPos = new THREE.Vector3(camX, camY, camZ + swivelZ);
-      const aimDir = lookTarget.clone().sub(camWorldPos).normalize();
-      aimGroup.lookAt(aimDir);
-
-      // 5. Industrial Bullet Camera Housing
-      const bodyGeo = new THREE.CylinderGeometry(0.052, 0.065, 0.22, 16);
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: isDark ? 0xe2e8f0 : 0xf8fafc,
-        metalness: 0.5,
-        roughness: 0.2,
-      });
-      const body = new THREE.Mesh(bodyGeo, bodyMat);
-      body.rotation.x = Math.PI / 2;
-      body.position.set(0, 0, 0.10);
-      aimGroup.add(body);
-
-      // 6. Protective Sunshield Canopy
-      const shieldGeo = new THREE.CylinderGeometry(0.072, 0.072, 0.16, 16, 1, true, 0, Math.PI);
-      const shieldMat = new THREE.MeshStandardMaterial({
-        color: isDark ? 0x0f172a : 0x334155,
-        metalness: 0.7,
-        roughness: 0.3,
-        side: THREE.DoubleSide,
-      });
-      const shield = new THREE.Mesh(shieldGeo, shieldMat);
-      shield.rotation.x = Math.PI / 2;
-      shield.rotation.z = Math.PI;
-      shield.position.set(0, 0.02, 0.12);
-      aimGroup.add(shield);
-
-      // 7. Lens Rim & Optical Tinted Glass
-      const lensRimGeo = new THREE.CylinderGeometry(0.050, 0.050, 0.02, 16);
-      const lensRimMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.1 });
-      const lensRim = new THREE.Mesh(lensRimGeo, lensRimMat);
-      lensRim.rotation.x = Math.PI / 2;
-      lensRim.position.set(0, 0, 0.21);
-      aimGroup.add(lensRim);
-
-      const lensGlassGeo = new THREE.CircleGeometry(0.038, 16);
-      const lensGlassMat = new THREE.MeshBasicMaterial({ color: 0x0284c7, side: THREE.DoubleSide });
-      const lensGlass = new THREE.Mesh(lensGlassGeo, lensGlassMat);
-      lensGlass.position.set(0, 0, 0.221);
-      aimGroup.add(lensGlass);
-
-      // 8. Active Status LED
-      const ledGeo = new THREE.SphereGeometry(0.012, 8, 8);
-      const ledMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
-      const led = new THREE.Mesh(ledGeo, ledMat);
-      led.position.set(0.032, 0.032, 0.21);
-      aimGroup.add(led);
-
-      camGroup.add(aimGroup);
-      layoutGroup.add(camGroup);
-
-      // 9. Strict Blue-Wall Interior Ray & Volumetric FOV Clipping
-      const forwardDir = aimDir.clone();
-      const worldUp = new THREE.Vector3(0, 1, 0);
-      const rightDir = new THREE.Vector3().crossVectors(forwardDir, worldUp).normalize();
-      const upDir = new THREE.Vector3().crossVectors(rightDir, forwardDir).normalize();
-
-      const halfHRad = (fovDeg * Math.PI) / 360.0;
-      const halfW = rangeM * Math.tan(halfHRad);
-      const halfH = halfW * (9 / 16);
-
-      const farCenter = camWorldPos.clone().addScaledVector(forwardDir, rangeM);
-      const rawC1 = farCenter.clone().addScaledVector(rightDir, -halfW).addScaledVector(upDir, halfH);
-      const rawC2 = farCenter.clone().addScaledVector(rightDir, halfW).addScaledVector(upDir, halfH);
-      const rawC3 = farCenter.clone().addScaledVector(rightDir, halfW).addScaledVector(upDir, -halfH);
-      const rawC4 = farCenter.clone().addScaledVector(rightDir, -halfW).addScaledVector(upDir, -halfH);
-
-      // Ray-Box Intersect: Clips any ray strictly against the blue SLAM wall boundary
-      const clipRayInsideWalls = (origin: THREE.Vector3, target: THREE.Vector3): THREE.Vector3 => {
-        const dx = target.x - origin.x;
-        const dy = target.y - origin.y;
-        const dz = target.z - origin.z;
-        let tMax = 1.0;
-
-        if (dx < -1e-5 && origin.x + dx < ROOM_X_MIN) tMax = Math.min(tMax, (ROOM_X_MIN - origin.x) / dx);
-        if (dx > 1e-5 && origin.x + dx > ROOM_X_MAX) tMax = Math.min(tMax, (ROOM_X_MAX - origin.x) / dx);
-        if (dz < -1e-5 && origin.z + dz < ROOM_Z_MIN) tMax = Math.min(tMax, (ROOM_Z_MIN - origin.z) / dz);
-        if (dz > 1e-5 && origin.z + dz > ROOM_Z_MAX) tMax = Math.min(tMax, (ROOM_Z_MAX - origin.z) / dz);
-        if (dy < -1e-5 && origin.y + dy < FLOOR_Y) tMax = Math.min(tMax, (FLOOR_Y - origin.y) / dy);
-
-        tMax = Math.max(0.05, Math.min(1.0, tMax));
-        return new THREE.Vector3(
-          Math.max(ROOM_X_MIN, Math.min(ROOM_X_MAX, origin.x + tMax * dx)),
-          Math.max(FLOOR_Y, origin.y + tMax * dy),
-          Math.max(ROOM_Z_MIN, Math.min(ROOM_Z_MAX, origin.z + tMax * dz))
-        );
-      };
-
-      const c1 = clipRayInsideWalls(camWorldPos, rawC1);
-      const c2 = clipRayInsideWalls(camWorldPos, rawC2);
-      const c3 = clipRayInsideWalls(camWorldPos, rawC3);
-      const c4 = clipRayInsideWalls(camWorldPos, rawC4);
-
-      // Floor Footprint Points (strictly inside blue walls)
-      const g1 = new THREE.Vector3(c1.x, FLOOR_Y, c1.z);
-      const g2 = new THREE.Vector3(c2.x, FLOOR_Y, c2.z);
-      const g3 = new THREE.Vector3(c3.x, FLOOR_Y, c3.z);
-      const g4 = new THREE.Vector3(c4.x, FLOOR_Y, c4.z);
-
-      // 3D Volumetric Mesh (Semi-transparent Viewing Pyramid inside room)
-      const fGeo = new THREE.BufferGeometry();
-      const fVertices = new Float32Array([
-        // Top triangle (cam -> c1 -> c2)
-        camWorldPos.x, camWorldPos.y, camWorldPos.z,
-        c1.x, c1.y, c1.z,
-        c2.x, c2.y, c2.z,
-
-        // Right triangle (cam -> c2 -> c3)
-        camWorldPos.x, camWorldPos.y, camWorldPos.z,
-        c2.x, c2.y, c2.z,
-        c3.x, c3.y, c3.z,
-
-        // Bottom triangle (cam -> c3 -> c4)
-        camWorldPos.x, camWorldPos.y, camWorldPos.z,
-        c3.x, c3.y, c3.z,
-        c4.x, c4.y, c4.z,
-
-        // Left triangle (cam -> c4 -> c1)
-        camWorldPos.x, camWorldPos.y, camWorldPos.z,
-        c4.x, c4.y, c4.z,
-        c1.x, c1.y, c1.z,
-
-        // Far quad (c1 -> c2 -> c3 & c1 -> c3 -> c4)
-        c1.x, c1.y, c1.z,
-        c2.x, c2.y, c2.z,
-        c3.x, c3.y, c3.z,
-
-        c1.x, c1.y, c1.z,
-        c3.x, c3.y, c3.z,
-        c4.x, c4.y, c4.z,
-      ]);
-      fGeo.setAttribute('position', new THREE.BufferAttribute(fVertices, 3));
-      fGeo.computeVertexNormals();
-
-      const fMat = new THREE.MeshBasicMaterial({
-        color: themeColor,
-        transparent: true,
-        opacity: isDark ? 0.09 : 0.06,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      layoutGroup.add(new THREE.Mesh(fGeo, fMat));
-
-      // Glowing Wireframe Rays
-      const rayGeo = new THREE.BufferGeometry();
-      const rayPositions = new Float32Array([
-        camWorldPos.x, camWorldPos.y, camWorldPos.z, c1.x, c1.y, c1.z,
-        camWorldPos.x, camWorldPos.y, camWorldPos.z, c2.x, c2.y, c2.z,
-        camWorldPos.x, camWorldPos.y, camWorldPos.z, c3.x, c3.y, c3.z,
-        camWorldPos.x, camWorldPos.y, camWorldPos.z, c4.x, c4.y, c4.z,
-        c1.x, c1.y, c1.z, c2.x, c2.y, c2.z,
-        c2.x, c2.y, c2.z, c3.x, c3.y, c3.z,
-        c3.x, c3.y, c3.z, c4.x, c4.y, c4.z,
-        c4.x, c4.y, c4.z, c1.x, c1.y, c1.z,
-      ]);
-      rayGeo.setAttribute('position', new THREE.BufferAttribute(rayPositions, 3));
-      const rayMat = new THREE.LineBasicMaterial({
-        color: themeColor,
-        transparent: true,
-        opacity: 0.60,
-      });
-      layoutGroup.add(new THREE.LineSegments(rayGeo, rayMat));
-
-      // Floor Footprint Polygon (Strictly inside blue room)
-      const floorGeo = new THREE.BufferGeometry();
-      const floorVertices = new Float32Array([
-        g1.x, FLOOR_Y, g1.z,
-        g2.x, FLOOR_Y, g2.z,
-        g3.x, FLOOR_Y, g3.z,
-
-        g1.x, FLOOR_Y, g1.z,
-        g3.x, FLOOR_Y, g3.z,
-        g4.x, FLOOR_Y, g4.z,
-      ]);
-      floorGeo.setAttribute('position', new THREE.BufferAttribute(floorVertices, 3));
-      const floorMat = new THREE.MeshBasicMaterial({
-        color: themeColor,
-        transparent: true,
-        opacity: isDark ? 0.13 : 0.09,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      layoutGroup.add(new THREE.Mesh(floorGeo, floorMat));
-
-      // Floor Footprint Border Line
-      const floorBorderGeo = new THREE.BufferGeometry();
-      const floorBorderPos = new Float32Array([
-        g1.x, FLOOR_Y + 0.005, g1.z, g2.x, FLOOR_Y + 0.005, g2.z,
-        g2.x, FLOOR_Y + 0.005, g2.z, g3.x, FLOOR_Y + 0.005, g3.z,
-        g3.x, FLOOR_Y + 0.005, g3.z, g4.x, FLOOR_Y + 0.005, g4.z,
-        g4.x, FLOOR_Y + 0.005, g4.z, g1.x, FLOOR_Y + 0.005, g1.z,
-      ]);
-      floorBorderGeo.setAttribute('position', new THREE.BufferAttribute(floorBorderPos, 3));
-      const floorBorderMat = new THREE.LineBasicMaterial({
-        color: themeColor,
-        transparent: true,
-        opacity: 0.90,
-      });
-      layoutGroup.add(new THREE.LineSegments(floorBorderGeo, floorBorderMat));
-
-      // 10. Floating 3D Camera Name Badge
-      const camCanvas = document.createElement('canvas');
-      camCanvas.width = 280;
-      camCanvas.height = 72;
-      const camCtx = camCanvas.getContext('2d');
-      if (camCtx) {
-        camCtx.fillStyle = 'rgba(15, 23, 42, 0.92)';
-        camCtx.beginPath();
-        camCtx.roundRect(4, 4, 272, 64, 14);
-        camCtx.fill();
-        camCtx.lineWidth = 3;
-        camCtx.strokeStyle = hexColorStr;
-        camCtx.stroke();
-
-        camCtx.font = 'bold 24px "Space Grotesk", sans-serif';
-        camCtx.fillStyle = hexColorStr;
-        camCtx.textAlign = 'center';
-        camCtx.fillText(`📹 ${cam.id}`, 140, 44);
-      }
-      const camTex = new THREE.CanvasTexture(camCanvas);
-      camTex.needsUpdate = true;
-      const camBadgeMat = new THREE.SpriteMaterial({ map: camTex, transparent: true, depthWrite: false });
-      const camBadgeSprite = new THREE.Sprite(camBadgeMat);
-      camBadgeSprite.position.set(camX, camY + 0.35, camZ);
-      camBadgeSprite.scale.set(0.95, 0.25, 1);
-      layoutGroup.add(camBadgeSprite);
-    });
-  }, [layout, isDark, viewMode, slamMapHref, slamMapRect]);
+  }, [layout, viewMode, isDark]);
 
   // ─── 3D Mesh Sync: High-Fidelity Ultra-Realistic Robot, Person, and Rack Meshes ───────────
   useEffect(() => {
@@ -1939,9 +1278,9 @@ export default function RobotMap3DView() {
         // B. Main Body (Vibrant Emerald Green Industrial Finish matching FMS Image 2)
         const isOffline = r.status === 'OFFLINE';
         const isCharging = r.status === 'CHARGING';
-        const bodyColor = isOffline ? 0x475569 : isCharging ? 0xf59e0b : r.status === 'ERROR' ? 0xef4444 : r.status === 'IDLE' ? 0x0284c7 : 0x16a34a;
-        const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x10b981;
-        const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x10b981;
+        const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
+        const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x4cebdd;
+        const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x4cebdd;
         const bodyGeo = new THREE.BoxGeometry(0.92, 0.16, 0.64);
         const bodyMat = new THREE.MeshStandardMaterial({
           color: bodyColor,
@@ -2095,9 +1434,9 @@ export default function RobotMap3DView() {
         group.add(pulseRing);
 
         // L. Floating 3D Holographic Badge with Direct In-Place Canvas (Zero Texture Allocation Stalls)
-        const labelKey = `${r.id}:${r.battery}:${r.status}:${r.carried_rack_id}:${r.cross_check_status}:${r.delta_distance_m}`;
+        const labelKey = `${r.id}:${r.battery}:${r.status}:${r.carried_rack_id}:${r.cross_check_status}:${r.delta_distance_m}:${r.velocity}`;
         const { sprite: labelSprite, canvas: labelCanvas, ctx: labelCtx, texture: labelTexture } = createRobotLabelSprite(
-          r.id, r.battery, r.status, r.carried_rack_id, r.cross_check_status, r.delta_distance_m
+          r.id, r.battery, r.status, r.carried_rack_id, r.cross_check_status, r.delta_distance_m, r.velocity
         );
         labelSprite.visible = showLabels;
         group.add(labelSprite);
@@ -2126,12 +1465,20 @@ export default function RobotMap3DView() {
       // Live updates
       meshData.targetPos.set(r.position[0], 0, r.position[2]);
       meshData.targetHeading = -r.heading;
+
+      let trail = trailsRef.current.get(rid);
+      if (!trail && sceneRef.current) {
+        trail = createRobotTrail();
+        sceneRef.current.add(trail.line);
+        trailsRef.current.set(rid, trail);
+      }
+      if (trail) updateRobotTrail(trail, r.position, Date.now(), r.status === 'CHARGING' ? 0xefc06e : 0x48d9ce);
       
       const isOffline = r.status === 'OFFLINE';
       const isCharging = r.status === 'CHARGING';
-      const bodyColor = isOffline ? 0x475569 : isCharging ? 0xf59e0b : r.status === 'ERROR' ? 0xef4444 : r.status === 'IDLE' ? 0x0284c7 : 0x16a34a;
-      const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x10b981;
-      const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x10b981;
+      const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
+      const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x4cebdd;
+      const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x4cebdd;
       (meshData.bodyMesh.material as THREE.MeshStandardMaterial).color.set(bodyColor);
       (meshData.beaconMesh.material as THREE.MeshStandardMaterial).color.set(beaconColor);
       (meshData.beaconMesh.material as THREE.MeshStandardMaterial).emissive.set(beaconEmissive);
@@ -2140,17 +1487,19 @@ export default function RobotMap3DView() {
       meshData.rackMountGroup.visible = Boolean(r.has_rack || r.carried_rack_id);
       meshData.labelSprite.visible = showLabels;
       
-      const labelKey = `${r.id}:${r.battery}:${r.status}:${r.carried_rack_id}:${r.cross_check_status}:${r.delta_distance_m}`;
+      const labelKey = `${r.id}:${r.battery}:${r.status}:${r.carried_rack_id}:${r.cross_check_status}:${r.delta_distance_m}:${r.velocity}`;
       if (meshData.lastLabelKey !== labelKey) {
         meshData.lastLabelKey = labelKey;
-        updateRobotLabelCanvas(meshData.labelCanvas, meshData.labelCtx, r.id, r.battery, r.status, r.carried_rack_id, r.cross_check_status, r.delta_distance_m);
+        updateRobotLabelCanvas(meshData.labelCanvas, meshData.labelCtx, r.id, r.battery, r.status, r.carried_rack_id, r.cross_check_status, r.delta_distance_m, r.velocity);
         meshData.labelTexture.needsUpdate = true;
       }
     });
 
     robotMeshesRef.current.forEach((meshData, rid) => {
       if (!robots[rid]) {
-        meshData.labelTexture.dispose();
+        disposeTwinObject(meshData.group);
+        const trail = trailsRef.current.get(rid);
+        if (trail) { sceneRef.current?.remove(trail.line); disposeTwinObject(trail.line); trailsRef.current.delete(rid); }
         entitiesGroup.remove(meshData.group);
         robotMeshesRef.current.delete(rid);
       }
@@ -2243,7 +1592,7 @@ export default function RobotMap3DView() {
 
     personMeshesRef.current.forEach((meshData, pid) => {
       if (!persons[pid]) {
-        meshData.labelTexture.dispose();
+        disposeTwinObject(meshData.group);
         entitiesGroup.remove(meshData.group);
         personMeshesRef.current.delete(pid);
       }
@@ -2330,7 +1679,7 @@ export default function RobotMap3DView() {
 
     rackMeshesRef.current.forEach((meshData, rkid) => {
       if (!racks[rkid]) {
-        meshData.labelTexture.dispose();
+        disposeTwinObject(meshData.group);
         entitiesGroup.remove(meshData.group);
         rackMeshesRef.current.delete(rkid);
       }
@@ -2411,162 +1760,53 @@ export default function RobotMap3DView() {
   const selectedRobot = selectedEntity?.type === 'robot' ? robots[selectedEntity.id] : null;
   const selectedPerson = selectedEntity?.type === 'person' ? persons[selectedEntity.id] : null;
   const selectedRack = selectedEntity?.type === 'rack' ? racks[selectedEntity.id] : null;
+  const fmsLive = telemetryConnected && fmsMeta.mqtt_connected && fmsMeta.mode === 'LIVE';
+  const alertCount = Object.values(robots).filter(robot => robot.status === 'ERROR' || robot.cross_check_status === 'DEVIATED').length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 84px)', width: '100%', background: 'var(--bg-main)', overflow: 'hidden' }}>
-      {/* ── TOP KPI & CONTROL BAR ── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 20px',
-        background: 'var(--bg-card)',
-        borderBottom: '1px solid var(--border)',
-        zIndex: 10,
-      }}>
-        {/* Left: Title & Realtime Broadcaster Status */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Sparkles size={20} style={{ color: 'var(--cyan)' }} />
-            <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>
-              3D Digital Twin & Real-Time Tracking
-            </span>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '5px 12px',
-            borderRadius: '999px',
-            background: 'rgba(22, 163, 74, 0.15)',
-            border: '1px solid rgba(22, 163, 74, 0.35)',
-          }}>
-            <span style={{
-              width: '8px', height: '8px', borderRadius: '50%',
-              background: '#16a34a', boxShadow: '0 0 8px #16a34a',
-              animation: 'pulse 2s infinite'
-            }} />
-            <span style={{ fontSize: '12px', fontWeight: 700, color: '#16a34a', fontFamily: 'monospace' }}>
-              VISION + FMS FUSION (15Hz)
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--text-sub)' }}>
-            <span>Tần số: <strong style={{ color: 'var(--cyan)' }}>{packetRate} Hz</strong></span>
+    <div className={styles.root}>
+      <header className={styles.header}>
+        <div className={styles.brand}>
+          <div className={styles.brandIcon}><Boxes size={22} /></div>
+          <div>
+            <div className={styles.eyebrow}>R-SKYVIEW / RTC TECHNOLOGY</div>
+            <h2 className={styles.title}>REAL-TIME FACTORY FLOOR TWIN</h2>
           </div>
         </div>
-
-        {/* Center: Multi-Entity KPI Badges */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            background: 'rgba(22, 163, 74, 0.12)', padding: '5px 12px',
-            borderRadius: '8px', border: '1px solid rgba(22, 163, 74, 0.32)',
-          }}>
-            <Bot size={15} color="#22c55e" />
-            <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: 600 }}>Robots:</span>
-            <strong style={{ fontSize: '13px', color: '#22c55e', fontFamily: 'monospace' }}>{Object.keys(robots).length}</strong>
-          </div>
-
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            background: 'rgba(249, 115, 22, 0.12)', padding: '5px 12px',
-            borderRadius: '8px', border: '1px solid rgba(249, 115, 22, 0.35)',
-          }}>
-            <User size={15} color="#fb923c" />
-            <span style={{ fontSize: '11px', color: '#fb923c', fontWeight: 600 }}>Công Nhân:</span>
-            <strong style={{ fontSize: '13px', color: '#fb923c', fontFamily: 'monospace' }}>{Object.keys(persons).length}</strong>
-          </div>
-
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px',
-            background: 'rgba(168, 85, 247, 0.12)', padding: '5px 12px',
-            borderRadius: '8px', border: '1px solid rgba(168, 85, 247, 0.35)',
-          }}>
-            <Package size={15} color="#c084fc" />
-            <span style={{ fontSize: '11px', color: '#c084fc', fontWeight: 600 }}>Kệ Hàng:</span>
-            <strong style={{ fontSize: '13px', color: '#c084fc', fontFamily: 'monospace' }}>{Object.keys(racks).length}</strong>
-          </div>
+        <div className={styles.statusRow}>
+          <span className={styles.connection + (fmsLive ? '' : ' ' + styles.disconnected)}>
+            <i />{fmsLive ? 'FMS LIVE' : 'FMS · CHỜ KẾT NỐI'}
+          </span>
+          <span>{Object.keys(robots).length} robots · {packetRate} Hz</span>
+          {alertCount > 0 && <span className={styles.alert}><AlertTriangle size={14} />{alertCount} cảnh báo</span>}
+          <span>{layout?.slam_map?.map_name || 'FMS'} / MÉT</span>
         </div>
-
-        {/* Right: View & Camera Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            display: 'flex', background: 'var(--bg-elevated)',
-            borderRadius: '10px', padding: '3px', border: '1px solid var(--border)',
-          }}>
-            <button
-              onClick={() => setViewMode('3D')}
-              style={{
-                padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-                cursor: 'pointer',
-                background: viewMode === '3D' ? 'linear-gradient(135deg, #16a34a, #15803d)' : 'transparent',
-                color: viewMode === '3D' ? '#ffffff' : 'var(--text-sub)',
-                border: 'none', transition: 'all 0.2s',
-              }}
-            >
-              3D Digital Twin
-            </button>
-            <button
-              onClick={() => setViewMode('2D')}
-              style={{
-                padding: '6px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-                cursor: 'pointer',
-                background: viewMode === '2D' ? 'linear-gradient(135deg, #16a34a, #15803d)' : 'transparent',
-                color: viewMode === '2D' ? '#ffffff' : 'var(--text-sub)',
-                border: 'none', transition: 'all 0.2s',
-              }}
-            >
-              2D Bản Đồ FMS
-            </button>
-          </div>
-
-          {viewMode === '3D' && (
-            <button
-              onClick={handleResetCamera}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                padding: '7px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-                cursor: 'pointer', background: 'var(--bg-elevated)', color: 'var(--text-label)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              <RotateCcw size={13} />
-              Reset Cam
-            </button>
-          )}
-
-          {viewMode === '3D' && selectedEntity && (
-            <button
-              onClick={() => setFollowTarget(!followTarget)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                padding: '7px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: 700,
-                cursor: 'pointer',
-                background: followTarget ? 'rgba(22, 163, 74, 0.15)' : 'var(--bg-elevated)',
-                color: followTarget ? '#22c55e' : 'var(--text-label)',
-                border: `1px solid ${followTarget ? 'rgba(22, 163, 74, 0.4)' : 'var(--border)'}`,
-              }}
-            >
-              <Crosshair size={14} />
-              Follow {selectedEntity.type === 'robot' ? 'Robot' : selectedEntity.type === 'person' ? 'Person' : 'Rack'}
-            </button>
-          )}
-        </div>
-      </div>
+      </header>
 
       {/* ── MAIN WORKSPACE ── */}
-      <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div className={styles.workspace}>
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarGroup}>
+            <button aria-pressed={viewMode === '3D'} onClick={() => setViewMode('3D')}><Layers size={14} />3D Twin</button>
+            <button aria-pressed={viewMode === '2D'} onClick={() => setViewMode('2D')}><MapPin size={14} />2D FMS</button>
+            <button title="Góc nhìn tổng thể" aria-label="Góc nhìn tổng thể" disabled={viewMode !== '3D'} onClick={handleResetCamera}><RotateCcw size={14} /></button>
+          </div>
+          <div className={styles.toolbarGroup}>
+            <button aria-pressed={showFleet} onClick={() => setShowFleet(previous => !previous)}><Bot size={14} />Đội xe</button>
+            <button aria-pressed={showInspector} onClick={() => setShowInspector(previous => !previous)}><Activity size={14} />Chi tiết</button>
+            <button aria-pressed={followTarget} disabled={viewMode !== '3D' || !selectedEntity} title="Theo đối tượng đã chọn" onClick={() => setFollowTarget(previous => !previous)}><Crosshair size={14} /></button>
+          </div>
+        </div>
         {/* ── LEFT PANEL: MULTI-ENTITY FLEET SELECTOR ── */}
-        <div style={{
+        <div className={styles.fleet} style={{
           width: '320px',
           background: 'var(--bg-card)',
           borderRight: '1px solid var(--border)',
-          display: 'flex',
+          display: showFleet ? 'flex' : 'none',
           flexDirection: 'column',
           zIndex: 5,
         }}>
+          <div className={styles.fleetHeading}><span>FLEET OVERVIEW</span><strong>{Object.keys(robots).length.toString().padStart(2, '0')} UNITS</strong></div>
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
             <button
@@ -2734,7 +1974,7 @@ export default function RobotMap3DView() {
         </div>
 
         {/* ── CENTER: 3D DIGITAL TWIN VIEWPORT OR 2D MAP ── */}
-        <div style={{ flex: 1, position: 'relative', height: '100%', overflow: 'hidden' }}>
+        <div className={styles.viewport} style={{ flex: 1, position: 'relative', height: '100%', overflow: 'hidden' }}>
           {viewMode === '3D' ? (
             <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
           ) : (
@@ -2862,68 +2102,6 @@ export default function RobotMap3DView() {
                   </g>
                 ))}
 
-                {/* 2D Industrial Cameras with FOV Frustums (Strictly clipped inside blue walls) */}
-                {((layout?.cameras && layout.cameras.length > 0) ? layout.cameras : DEFAULT_CAMERAS).map((cam, camIdx) => {
-                  const isCam1 = cam.id.toLowerCase().includes('1') || camIdx === 0;
-                  const col = isCam1 ? '#06b6d4' : '#6366f1';
-                  const posX = cam.position[0];
-                  const posZ = cam.position[2];
-                  const lookX = cam.look_at ? cam.look_at[0] : (isCam1 ? 10.5 : 15.2);
-                  const lookZ = cam.look_at ? cam.look_at[2] : (isCam1 ? 11.8 : 12.0);
-                  const angleRad = Math.atan2(lookZ - posZ, lookX - posX);
-                  const angleDeg = (angleRad * 180) / Math.PI;
-                  const fov = cam.fov_deg ?? (isCam1 ? 76 : 78);
-                  const range = cam.range_m ?? (isCam1 ? 8.8 : 8.2);
-                  const halfFovRad = ((fov / 2) * Math.PI) / 180;
-
-                  const rawP1x = posX + range * Math.cos(angleRad - halfFovRad);
-                  const rawP1z = posZ + range * Math.sin(angleRad - halfFovRad);
-                  const rawP2x = posX + range * Math.cos(angleRad + halfFovRad);
-                  const rawP2z = posZ + range * Math.sin(angleRad + halfFovRad);
-
-                  const clampPt = (x: number, z: number) => {
-                    const dx = x - posX;
-                    const dz = z - posZ;
-                    let t = 1.0;
-                    if (dx < -1e-5 && posX + dx < 6.30) t = Math.min(t, (6.30 - posX) / dx);
-                    if (dx > 1e-5 && posX + dx > 21.80) t = Math.min(t, (21.80 - posX) / dx);
-                    if (dz < -1e-5 && posZ + dz < 6.92) t = Math.min(t, (6.92 - posZ) / dz);
-                    if (dz > 1e-5 && posZ + dz > 15.38) t = Math.min(t, (15.38 - posZ) / dz);
-                    t = Math.max(0.05, Math.min(1.0, t));
-                    return [
-                      Math.max(6.30, Math.min(21.80, posX + t * dx)),
-                      Math.max(6.92, Math.min(15.38, posZ + t * dz)),
-                    ];
-                  };
-
-                  const [p1x, p1z] = clampPt(rawP1x, rawP1z);
-                  const [p2x, p2z] = clampPt(rawP2x, rawP2z);
-
-                  return (
-                    <g key={`2d-cam-${cam.id}`}>
-                      {/* FOV Frustum Cone */}
-                      <polygon
-                        points={`${posX},${posZ} ${p1x},${p1z} ${p2x},${p2z}`}
-                        fill={col}
-                        fillOpacity={isDark ? 0.16 : 0.12}
-                        stroke={col}
-                        strokeWidth="0.03"
-                        strokeDasharray="0.1 0.05"
-                      />
-                      {/* Camera Body Icon */}
-                      <g transform={`translate(${posX}, ${posZ}) rotate(${angleDeg})`}>
-                        <rect x="-0.22" y="-0.14" width="0.44" height="0.28" rx="0.06" fill="#0f172a" stroke={col} strokeWidth="0.04" />
-                        <polygon points="0.22,-0.10 0.36,-0.18 0.36,0.18 0.22,0.10" fill={col} />
-                        <circle cx="-0.06" cy="0" r="0.05" fill={col} />
-                      </g>
-                      {/* Camera Floating Label */}
-                      <rect x={posX - 0.55} y={posZ - 0.48} width="1.1" height="0.32" rx="0.06" fill="rgba(15,23,42,0.85)" stroke={col} strokeWidth="0.02" />
-                      <text x={posX} y={posZ - 0.27} textAnchor="middle" fill={col} fontSize="0.18" fontWeight="bold">
-                        📹 {cam.id}
-                      </text>
-                    </g>
-                  );
-                })}
 
                 {/* 2D Racks */}
                 {Object.values(racks).map((rk) => (
@@ -2998,14 +2176,22 @@ export default function RobotMap3DView() {
               </svg>
             </div>
           )}
+          <div className={styles.legend}>
+            <span><i />Đường FMS</span>
+            <span><i className={styles.amber} />Trạm sạc</span>
+            <span><i className={styles.trail} />Vệt di chuyển thực</span>
+            <span>Lưới {layout?.grid?.cell_size ?? 0.5} m</span>
+          </div>
+          <div className={styles.mapStamp}><strong>{layout?.name || 'FMS FLOOR'}</strong>FMS COORDINATES · LIVE TELEMETRY</div>
+          {!telemetryConnected && <div className={styles.empty}>Đang kết nối dữ liệu realtime… Không mô phỏng vị trí robot.</div>}
         </div>
 
         {/* ── RIGHT PANEL: SELECTED ENTITY TELEMETRY & INSPECTOR ── */}
-        <div style={{
+        <div className={styles.inspector} style={{
           width: '360px',
           background: 'var(--bg-card)',
           borderLeft: '1px solid var(--border)',
-          display: 'flex',
+          display: showInspector ? 'flex' : 'none',
           flexDirection: 'column',
           zIndex: 5,
         }}>
@@ -3067,7 +2253,7 @@ export default function RobotMap3DView() {
                       </div>
                     ) : selectedRobot.fms_position ? (
                       <div>
-                        Tọa độ FMS: <b style={{ color: '#38bdf8' }}>X: {(selectedRobot.fms_position[0] + 185.0).toFixed(2)} Y: {(194.5 + (18.0 - selectedRobot.fms_position[2])).toFixed(2)} θ: {(-selectedRobot.heading).toFixed(2)}</b>
+                        Tọa độ scene FMS: <b style={{ color: '#38bdf8' }}>X: {selectedRobot.fms_position[0].toFixed(2)} Z: {selectedRobot.fms_position[2].toFixed(2)}</b>
                       </div>
                     ) : null}
                     <div>

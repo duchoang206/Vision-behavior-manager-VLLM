@@ -13,6 +13,7 @@ import styles from './DashboardShell.module.css';
 const descriptions = {
   monitor: { en: 'Live cameras, tracking and activity, in one place.', vi: 'Camera trực tiếp, bám vết và hoạt động trong cùng không gian.' },
   building: { en: 'Manage cameras, zones and registered labels.', vi: 'Quản lý camera, vùng giám sát và nhãn đã đăng ký.' },
+  calibration: { en: 'Match camera points to your FMS floor map.', vi: 'Ghép điểm camera với bản đồ FMS — một hệ tọa độ cho tracking và 3D.' },
   robot_map: { en: 'Your fleet and workspace, connected in real time.', vi: 'Kết nối đội robot và không gian vận hành theo thời gian thực.' },
   analytics: { en: 'Explore activity, reports and operational insights.', vi: 'Theo dõi hoạt động, báo cáo và dữ liệu vận hành.' },
 };
