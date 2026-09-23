@@ -3,10 +3,13 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { createFactoryFloor, createRobotTrail, disposeTwinObject, getFactoryView, updateRobotTrail } from '../../lib/factory-twin-scene';
 import { useTab } from '../TabContext';
 import styles from './RobotMap3DView.module.css';
+import CameraProjectionPanel from './CameraProjectionPanel';
 import { useLanguage } from '../LanguageContext';
+import { useAppTheme } from '../ThemeContext';
 import {
   Bot,
   User,
@@ -191,6 +194,18 @@ interface LayoutFrame {
   centerZ: number;
   gridSize: number;
   gridDivisions: number;
+}
+
+interface CalibratedCamera {
+  camera_id: string;
+  name: string;
+  footprint: Point2[];
+  anchor: Point3;
+  anchor_kind: 'camera_pose' | 'coverage_center';
+  physical_pose_known: boolean;
+  method?: string;
+  save_id?: string;
+  yaw?: number | null;
 }
 
 // ─── Color Palette for Statuses ─────────────────────────────────────────────
@@ -591,7 +606,7 @@ const mergeStableEntities = <T extends {
 export default function RobotMap3DView() {
   const { t } = useLanguage();
   const { activeTab } = useTab();
-  const isDark = true;
+  const { isDark } = useAppTheme();
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
   const [showFleet, setShowFleet] = useState(true);
@@ -603,11 +618,18 @@ export default function RobotMap3DView() {
   const [robots, setRobots] = useState<Record<string, RobotData>>(INITIAL_ROBOTS);
   const [persons, setPersons] = useState<Record<string, PersonData>>(INITIAL_PERSONS);
   const [racks, setRacks] = useState<Record<string, RackData>>(INITIAL_RACKS);
+  const telemetryRef = useRef({ robots: INITIAL_ROBOTS, persons: INITIAL_PERSONS, racks: INITIAL_RACKS });
 
   // Active Selection & Filter States (Default to Robot_2001 so speedometer is immediately alive)
   const [selectedEntity, setSelectedEntity] = useState<{ type: 'robot' | 'person' | 'rack'; id: string } | null>({ type: 'robot', id: 'Robot_2001' });
   const [fleetTab, setFleetTab] = useState<'robots' | 'persons' | 'racks'>('robots');
   const [viewMode, setViewMode] = useState<'3D' | '2D'>('3D');
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const [showCameraProjection, setShowCameraProjection] = useState(false);
+  const cameraProjectionRef = useRef(false);
+  cameraProjectionRef.current = showCameraProjection;
+  const [projectionPoint, setProjectionPoint] = useState<Point2 | null>(null);
   const [followTarget, setFollowTarget] = useState<boolean>(false);
   const [showLabels] = useState<boolean>(true);
 
@@ -631,6 +653,7 @@ export default function RobotMap3DView() {
   });
 
   const [layout, setLayout] = useState<FmsLayout | null>(null);
+  const [calibratedCameras, setCalibratedCameras] = useState<CalibratedCamera[]>([]);
   const [packetRate, setPacketRate] = useState<number>(0);
 
   // References for Three.js
@@ -746,6 +769,16 @@ export default function RobotMap3DView() {
     return () => { cancelled = true; controller?.abort(); clearInterval(interval); };
   }, []);
 
+  useEffect(() => {
+    if (!activeTab || activeTab !== 'robot_map') return;
+    const controller = new AbortController();
+    fetch('/api/backend/calibration/cameras', { signal: controller.signal, cache: 'no-store' })
+      .then(response => response.ok ? response.json() : null)
+      .then(data => { if (data?.cameras) setCalibratedCameras(data.cameras); })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [activeTab]);
+
   // ─── FMS Layout Loader ────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -789,65 +822,50 @@ export default function RobotMap3DView() {
         setTelemetryConnected(false);
       };
 
+      const socket = ws;
+      let lastMessageTimestamp = 0;
+      let lastUiAt = 0;
+      lastTelemetryAt.current = Date.now();
       ws.onmessage = (event) => {
+        if (disposed || socket !== ws) return;
         try {
-          packetCountRef.current++;
           const msg = JSON.parse(event.data);
+          const twin = msg.type === 'DIGITAL_TWIN_SYNC' || msg.type === 'DIGITAL_TWIN_TELEMETRY';
+          if (!twin && msg.type !== 'FULL' && msg.type !== 'PATCH') return;
           const nowMs = Date.now();
+          const timestamp = Number(msg.timestamp || 0) * (Number(msg.timestamp || 0) < 1e11 ? 1000 : 1);
+          if (timestamp && (timestamp < lastMessageTimestamp || nowMs - timestamp > 2000)) return;
+          lastMessageTimestamp = timestamp;
+          packetCountRef.current++;
           lastTelemetryAt.current = nowMs;
+          const data = twin ? msg : msg.state || msg.patch || {};
+          const current = telemetryRef.current;
+          if (data.robots) current.robots = mergeStableEntities(current.robots, normalizeListOrMap<RobotData>(data.robots), nowMs, 2.5);
+          if (data.persons) current.persons = mergeStableEntities(current.persons, normalizeListOrMap<PersonData>(data.persons), nowMs, 1.8);
+          if (data.racks) current.racks = mergeStableEntities(current.racks, normalizeListOrMap<RackData>(data.racks), nowMs, 1.8);
+          if (document.hidden || activeTabRef.current !== 'robot_map' || nowMs - lastUiAt < (viewModeRef.current === '3D' ? 200 : 60)) return;
+          lastUiAt = nowMs;
           setTelemetryConnected(true);
-
-          if (msg.type === 'DIGITAL_TWIN_SYNC' || msg.type === 'DIGITAL_TWIN_TELEMETRY') {
-            if (msg.robots) {
-              const incoming = normalizeListOrMap<RobotData>(msg.robots);
-              setRobots(prev => mergeStableEntities(prev, incoming, nowMs, 2.5));
-            }
-            if (msg.persons) {
-              const incoming = normalizeListOrMap<PersonData>(msg.persons);
-              setPersons(prev => mergeStableEntities(prev, incoming, nowMs, 1.8));
-            }
-            if (msg.racks) {
-              const incoming = normalizeListOrMap<RackData>(msg.racks);
-              setRacks(prev => mergeStableEntities(prev, incoming, nowMs, 1.8));
-            }
-            if (msg.fms_meta) {
-              setFmsMeta(msg.fms_meta);
-            }
-            if (msg.fleet_kpi) {
-              setKpi(prev => ({
-                ...prev,
-                total: msg.fleet_kpi.total_robots ?? (Array.isArray(msg.robots) ? msg.robots.length : Object.keys(msg.robots || {}).length),
-                active: msg.fleet_kpi.active_robots ?? 0,
-                charging: msg.fleet_kpi.charging_robots ?? 0,
-                idle: msg.fleet_kpi.idle_robots ?? 0,
-                persons_count: msg.fleet_kpi.total_persons ?? (Array.isArray(msg.persons) ? msg.persons.length : Object.keys(msg.persons || {}).length),
-                racks_count: msg.fleet_kpi.total_racks ?? (Array.isArray(msg.racks) ? msg.racks.length : Object.keys(msg.racks || {}).length),
-              }));
-            }
-          } else if (msg.type === 'FULL' || msg.type === 'PATCH') {
-            const data = msg.state || msg.patch || {};
-            if (data.robots) {
-              const incoming = normalizeListOrMap<RobotData>(data.robots);
-              setRobots(prev => mergeStableEntities(prev, incoming, nowMs, 2.5));
-            }
-            if (data.persons) {
-              const incoming = normalizeListOrMap<PersonData>(data.persons);
-              setPersons(prev => mergeStableEntities(prev, incoming, nowMs, 1.8));
-            }
-            if (data.racks) {
-              const incoming = normalizeListOrMap<RackData>(data.racks);
-              setRacks(prev => mergeStableEntities(prev, incoming, nowMs, 1.8));
-            }
-            if (data.kpi?.fleet) setKpi(prev => ({ ...prev, ...data.kpi.fleet }));
-            if (data.fms_meta) setFmsMeta(data.fms_meta);
-          }
-        } catch (e) {
-          console.error('[DigitalTwin WS] Parse error:', e);
+          setRobots(current.robots);
+          setPersons(current.persons);
+          setRacks(current.racks);
+          if (data.fms_meta) setFmsMeta(data.fms_meta);
+          if (data.fleet_kpi) setKpi(previous => ({ ...previous,
+            total: data.fleet_kpi.total_robots ?? Object.keys(current.robots).length,
+            active: data.fleet_kpi.active_robots ?? 0,
+            charging: data.fleet_kpi.charging_robots ?? 0,
+            idle: data.fleet_kpi.idle_robots ?? 0,
+            persons_count: data.fleet_kpi.total_persons ?? Object.keys(current.persons).length,
+            racks_count: data.fleet_kpi.total_racks ?? Object.keys(current.racks).length,
+          }));
+          if (data.kpi?.fleet) setKpi(previous => ({ ...previous, ...data.kpi.fleet }));
+        } catch {
+          socket.close(1003, 'Invalid telemetry');
         }
       };
-
-      ws.onerror = () => {};
+      ws.onerror = () => socket.close();
       ws.onclose = () => {
+        if (socket !== ws) return;
         setTelemetryConnected(false);
         if (!disposed) reconnectTimeout = setTimeout(connect, 1500);
       };
@@ -860,7 +878,10 @@ export default function RobotMap3DView() {
     rateInterval = setInterval(() => {
       setPacketRate(packetCountRef.current);
       packetCountRef.current = 0;
-      if (Date.now() - lastTelemetryAt.current > 3000) setTelemetryConnected(false);
+      if (Date.now() - lastTelemetryAt.current > 3000) {
+        setTelemetryConnected(false);
+        if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) ws.close(4000, 'Telemetry stalled');
+      }
     }, 1000);
 
     return () => {
@@ -1066,10 +1087,10 @@ export default function RobotMap3DView() {
     controlsRef.current = controls;
 
     // 4. Lighting
-    const ambientLight = new THREE.HemisphereLight(0xa9e7ed, 0x0b2028, 2.1);
+    const ambientLight = new THREE.HemisphereLight(0x91cfd6, 0x07151d, 1.25);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xc3edee, 2.4);
+    const dirLight = new THREE.DirectionalLight(0xb7e8eb, 1.55);
     dirLight.position.set(centerX + 12, 24, centerZ + 12);
     dirLight.castShadow = false;
     scene.add(dirLight);
@@ -1085,6 +1106,11 @@ export default function RobotMap3DView() {
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
+      if (event.shiftKey && cameraProjectionRef.current) {
+        const point = raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+        if (point) setProjectionPoint([point.x, point.z]);
+        return;
+      }
 
       const interactiveObjects: THREE.Object3D[] = [];
       robotMeshesRef.current.forEach((m) => interactiveObjects.push(m.group));
@@ -1134,7 +1160,6 @@ export default function RobotMap3DView() {
     const animate = (timestamp = 0) => {
       animFrameIdRef.current = requestAnimationFrame(animate);
       if (document.hidden || activeTabRef.current !== 'robot_map' || mountEl.clientWidth < 10) return;
-      if (timestamp - lastRenderAt < 1000 / 30) return;
       const elapsed = Math.min(0.1, (timestamp - lastRenderAt) / 1000);
       lastRenderAt = timestamp;
       const smoothing = 1 - Math.exp(-18 * elapsed);
@@ -1142,6 +1167,11 @@ export default function RobotMap3DView() {
 
       // A. Robots Animation
       robotMeshesRef.current.forEach((meshData, rid) => {
+        const latest = telemetryRef.current.robots[rid];
+        if (latest) {
+          meshData.targetPos.set(latest.position[0], 0, latest.position[2]);
+          meshData.targetHeading = -latest.heading;
+        }
         const { group, targetPos, targetHeading, pulseRing } = meshData;
         group.position.x += (targetPos.x - group.position.x) * smoothing;
         group.position.z += (targetPos.z - group.position.z) * smoothing;
@@ -1166,14 +1196,19 @@ export default function RobotMap3DView() {
 
       // B. Persons Animation
       personMeshesRef.current.forEach((meshData, pid) => {
+        const latest = telemetryRef.current.persons[pid];
+        if (latest) {
+          meshData.targetPos.set(latest.position[0], 0, latest.position[2]);
+          meshData.targetHeading = -latest.heading;
+        }
         const { group, targetPos, targetHeading } = meshData;
-        group.position.x += (targetPos.x - group.position.x) * 0.20;
-        group.position.z += (targetPos.z - group.position.z) * 0.20;
+        group.position.x += (targetPos.x - group.position.x) * smoothing;
+        group.position.z += (targetPos.z - group.position.z) * smoothing;
 
         let deltaHeading = targetHeading - group.rotation.y;
         while (deltaHeading > Math.PI) deltaHeading -= 2 * Math.PI;
         while (deltaHeading < -Math.PI) deltaHeading += 2 * Math.PI;
-        group.rotation.y += deltaHeading * 0.20;
+        group.rotation.y += deltaHeading * smoothing;
 
         const isMoving = Math.hypot(targetPos.x - group.position.x, targetPos.z - group.position.z) > 0.05;
         if (isMoving) {
@@ -1190,11 +1225,13 @@ export default function RobotMap3DView() {
       });
 
       // C. Racks Animation
-      rackMeshesRef.current.forEach((meshData) => {
+      rackMeshesRef.current.forEach((meshData, identifier) => {
+        const latest = telemetryRef.current.racks[identifier];
+        if (latest) meshData.targetPos.set(latest.position[0], 0, latest.position[2]);
         const { group, targetPos } = meshData;
-        group.position.x += (targetPos.x - group.position.x) * 0.18;
-        group.position.y += (targetPos.y - group.position.y) * 0.18;
-        group.position.z += (targetPos.z - group.position.z) * 0.18;
+        group.position.x += (targetPos.x - group.position.x) * smoothing;
+        group.position.y += (targetPos.y - group.position.y) * smoothing;
+        group.position.z += (targetPos.z - group.position.z) * smoothing;
       });
 
       renderer.render(scene, camera);
@@ -1224,12 +1261,26 @@ export default function RobotMap3DView() {
       layoutGroupRef.current = null;
       entitiesGroupRef.current = null;
     };
-  }, [viewMode, isDark]);
+  }, [viewMode]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const background = isDark ? '#061117' : '#eaf1f4';
+    scene.background = new THREE.Color(background);
+    if (scene.fog) scene.fog.color.set(background);
+    scene.children.forEach(object => {
+      if (object instanceof THREE.HemisphereLight) {
+        object.color.set(isDark ? 0x91cfd6 : 0xffffff);
+        object.groundColor.set(isDark ? 0x07151d : 0xb3c4c8);
+      }
+    });
+  }, [isDark, viewMode]);
 
   useEffect(() => {
     const parent = layoutGroupRef.current;
     if (viewMode !== '3D' || !parent) return;
-    const floor = createFactoryFloor(layout);
+    const floor = createFactoryFloor(layout, isDark);
     parent.add(floor);
     return () => {
       parent.remove(floor);
@@ -1249,6 +1300,8 @@ export default function RobotMap3DView() {
       if (!meshData) {
         const group = new THREE.Group();
         group.userData.robotId = rid;
+        const lowProfileRobot = /28100|6969/i.test(r.id);
+        const forkliftRobot = /2001/i.test(r.id);
 
         // 0. Realistic Contact Shadow on floor
         const shadowGeo = new THREE.PlaneGeometry(1.2, 0.9);
@@ -1264,7 +1317,7 @@ export default function RobotMap3DView() {
         group.add(shadowMesh);
 
         // A. Lower Chassis (Dark Anthracite)
-        const lowerGeo = new THREE.BoxGeometry(0.96, 0.12, 0.68);
+        const lowerGeo = new RoundedBoxGeometry(0.96, 0.12, 0.68, 3, 0.07);
         const lowerMat = new THREE.MeshStandardMaterial({
           color: 0x0f172a,
           metalness: 0.8,
@@ -1278,10 +1331,10 @@ export default function RobotMap3DView() {
         // B. Main Body (Vibrant Emerald Green Industrial Finish matching FMS Image 2)
         const isOffline = r.status === 'OFFLINE';
         const isCharging = r.status === 'CHARGING';
-        const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
+        const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : lowProfileRobot ? 0xe97828 : forkliftRobot ? 0xe2e8f0 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
         const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x4cebdd;
         const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x4cebdd;
-        const bodyGeo = new THREE.BoxGeometry(0.92, 0.16, 0.64);
+        const bodyGeo = new RoundedBoxGeometry(0.92, 0.16, 0.64, 3, 0.08);
         const bodyMat = new THREE.MeshStandardMaterial({
           color: bodyColor,
           metalness: 0.35,
@@ -1293,7 +1346,7 @@ export default function RobotMap3DView() {
         group.add(bodyMesh);
 
         // C. Top Shell (Beveled cover)
-        const topGeo = new THREE.BoxGeometry(0.78, 0.05, 0.54);
+        const topGeo = new RoundedBoxGeometry(0.78, 0.05, 0.54, 3, 0.035);
         const topMat = new THREE.MeshStandardMaterial({
           color: 0x1e293b,
           metalness: 0.6,
@@ -1304,7 +1357,7 @@ export default function RobotMap3DView() {
         group.add(topShell);
 
         // D. Front Black Sensor Visor (Sleek dark glass visor matching FMS Image 2)
-        const visorGeo = new THREE.BoxGeometry(0.10, 0.12, 0.56);
+        const visorGeo = new RoundedBoxGeometry(0.10, 0.12, 0.56, 3, 0.025);
         const visorMat = new THREE.MeshStandardMaterial({
           color: 0x020617,
           metalness: 0.95,
@@ -1313,6 +1366,21 @@ export default function RobotMap3DView() {
         const visor = new THREE.Mesh(visorGeo, visorMat);
         visor.position.set(0.44, 0.22, 0);
         group.add(visor);
+
+        if (forkliftRobot) {
+          const forkMaterial = new THREE.MeshStandardMaterial({ color: 0xb9c4cf, metalness: 0.82, roughness: 0.22 });
+          const forkRail = new THREE.Mesh(new RoundedBoxGeometry(0.56, 0.045, 0.055, 2, 0.018), forkMaterial);
+          forkRail.position.set(0.67, 0.16, -0.17);
+          const forkRailTwo = forkRail.clone();
+          forkRailTwo.position.z = 0.17;
+          group.add(forkRail, forkRailTwo);
+        }
+        if (lowProfileRobot) {
+          const bumperMaterial = new THREE.MeshStandardMaterial({ color: 0xff8a34, emissive: 0x321304, emissiveIntensity: 0.25, metalness: 0.35, roughness: 0.3 });
+          const bumper = new THREE.Mesh(new RoundedBoxGeometry(0.90, 0.045, 0.60, 3, 0.02), bumperMaterial);
+          bumper.position.set(0, 0.31, 0);
+          group.add(bumper);
+        }
 
         // Internal Glowing LiDAR diode in Visor
         const diodeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.03, 16);
@@ -1328,7 +1396,7 @@ export default function RobotMap3DView() {
           emissiveIntensity: isOffline ? 0.0 : 1.5,
         });
         [-0.20, 0.20].forEach((zOffset) => {
-          const lightMesh = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.08), headlightMat);
+          const lightMesh = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.04, 0.08, 2, 0.012), headlightMat);
           lightMesh.position.set(0.48, 0.22, zOffset);
           group.add(lightMesh);
         });
@@ -1340,7 +1408,7 @@ export default function RobotMap3DView() {
           emissiveIntensity: isOffline ? 0.0 : 1.2,
         });
         [-0.20, 0.20].forEach((zOffset) => {
-          const tailMesh = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.08), tailLightMat);
+          const tailMesh = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.04, 0.08, 2, 0.009), tailLightMat);
           tailMesh.position.set(-0.47, 0.22, zOffset);
           group.add(tailMesh);
         });
@@ -1476,7 +1544,9 @@ export default function RobotMap3DView() {
       
       const isOffline = r.status === 'OFFLINE';
       const isCharging = r.status === 'CHARGING';
-      const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
+      const lowProfileRobot = /28100|6969/i.test(r.id);
+      const forkliftRobot = /2001/i.test(r.id);
+      const bodyColor = isOffline ? 0x475569 : isCharging ? 0xcaa56c : r.status === 'ERROR' ? 0xdd6c62 : lowProfileRobot ? 0xe97828 : forkliftRobot ? 0xe2e8f0 : r.status === 'IDLE' ? 0x338b9c : 0x4ab9b4;
       const beaconColor = isOffline ? 0x64748b : isCharging ? 0xf59e0b : 0x4cebdd;
       const beaconEmissive = isOffline ? 0x000000 : isCharging ? 0xf59e0b : 0x4cebdd;
       (meshData.bodyMesh.material as THREE.MeshStandardMaterial).color.set(bodyColor);
@@ -1764,7 +1834,7 @@ export default function RobotMap3DView() {
   const alertCount = Object.values(robots).filter(robot => robot.status === 'ERROR' || robot.cross_check_status === 'DEVIATED').length;
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-theme={isDark ? 'dark' : 'light'}>
       <header className={styles.header}>
         <div className={styles.brand}>
           <div className={styles.brandIcon}><Boxes size={22} /></div>
@@ -1792,8 +1862,9 @@ export default function RobotMap3DView() {
             <button title="Góc nhìn tổng thể" aria-label="Góc nhìn tổng thể" disabled={viewMode !== '3D'} onClick={handleResetCamera}><RotateCcw size={14} /></button>
           </div>
           <div className={styles.toolbarGroup}>
-            <button aria-pressed={showFleet} onClick={() => setShowFleet(previous => !previous)}><Bot size={14} />Đội xe</button>
+            <button aria-pressed={showFleet && !showCameraProjection} onClick={() => { setShowFleet(showCameraProjection || !showFleet); setShowCameraProjection(false); }}><Bot size={14} />Đội xe</button>
             <button aria-pressed={showInspector} onClick={() => setShowInspector(previous => !previous)}><Activity size={14} />Chi tiết</button>
+            <button aria-pressed={showCameraProjection} onClick={() => setShowCameraProjection(previous => !previous)}><Crosshair size={14} />Camera ↔ FMS ({calibratedCameras.length})</button>
             <button aria-pressed={followTarget} disabled={viewMode !== '3D' || !selectedEntity} title="Theo đối tượng đã chọn" onClick={() => setFollowTarget(previous => !previous)}><Crosshair size={14} /></button>
           </div>
         </div>
@@ -1802,7 +1873,7 @@ export default function RobotMap3DView() {
           width: '320px',
           background: 'var(--bg-card)',
           borderRight: '1px solid var(--border)',
-          display: showFleet ? 'flex' : 'none',
+          display: showFleet && !showCameraProjection ? 'flex' : 'none',
           flexDirection: 'column',
           zIndex: 5,
         }}>
@@ -1975,6 +2046,7 @@ export default function RobotMap3DView() {
 
         {/* ── CENTER: 3D DIGITAL TWIN VIEWPORT OR 2D MAP ── */}
         <div className={styles.viewport} style={{ flex: 1, position: 'relative', height: '100%', overflow: 'hidden' }}>
+          {showCameraProjection && <CameraProjectionPanel cameras={calibratedCameras} floorPoint={projectionPoint} onClose={() => setShowCameraProjection(false)} />}
           {viewMode === '3D' ? (
             <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
           ) : (
@@ -2015,19 +2087,13 @@ export default function RobotMap3DView() {
                   <polygon
                     key={`walkway-${walkway.id}`}
                     points={polygonToPointsAttr(walkway.polygon)}
-                    fill={isDark ? "#1e293b" : "#e2e8f0"}
+                    fill={isDark ? "#15504d" : "#bfe4df"}
                     fillOpacity={isDark ? 0.75 : 0.85}
-                    stroke="none"
+                    stroke={isDark ? '#4cebdd' : '#008e8b'}
+                    strokeWidth="0.025"
+                    style={{ filter: 'drop-shadow(0 0 0.08px #20c4b5)' }}
                   />
                 ))}
-
-                {/* Directional Chevrons on Walkway Tracks (Giống FMS gốc) */}
-                <g stroke={isDark ? "rgba(255,255,255,0.25)" : "rgba(100,116,139,0.4)"} strokeWidth="0.06" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M 9.9 12.1 L 10.1 11.9 L 10.3 12.1" />
-                  <path d="M 9.9 12.35 L 10.1 12.15 L 10.3 12.35" />
-                  <path d="M 9.9 13.3 L 10.1 13.1 L 10.3 13.3" />
-                  <path d="M 9.9 13.55 L 10.1 13.35 L 10.3 13.55" />
-                </g>
 
                 {/* SLAM Physical Walls */}
                 {slamWallsSvgPath && (

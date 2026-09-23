@@ -54,16 +54,16 @@ export function disposeTwinObject(root: THREE.Object3D) {
   geometries.forEach(geometry => geometry.dispose());
 }
 
-export function createFactoryFloor(layout: FactoryLayout | null) {
+export function createFactoryFloor(layout: FactoryLayout | null, isDark = true) {
   const group = new THREE.Group();
   group.name = 'fms-factory-floor';
   const width = layout?.size?.width ?? 26;
   const depth = layout?.size?.depth ?? 18;
   const cell = Math.max(0.25, layout?.grid?.cell_size ?? 0.5);
-  const steel = new THREE.MeshStandardMaterial({ color: 0x173640, roughness: 0.7, metalness: 0.4 });
+  const steel = new THREE.MeshStandardMaterial({ color: isDark ? 0x173640 : 0x94b2b9, roughness: 0.7, metalness: 0.25 });
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
-  const cyan = new THREE.MeshBasicMaterial({ color: 0x4cebdd });
-  const amber = new THREE.MeshBasicMaterial({ color: 0xf6c76a });
+  const cyan = new THREE.MeshBasicMaterial({ color: isDark ? 0x4cebdd : 0x008b8a });
+  const amber = new THREE.MeshBasicMaterial({ color: isDark ? 0xf6c76a : 0xb3781c });
   const addBox = (dimensions: [number, number, number], position: [number, number, number], material: THREE.Material) => {
     const mesh = new THREE.Mesh(boxGeometry, material);
     mesh.scale.set(...dimensions);
@@ -78,18 +78,18 @@ export function createFactoryFloor(layout: FactoryLayout | null) {
   };
   addBox([width + 0.25, 0.24, depth + 0.25], [width / 2, -0.15, depth / 2], steel);
   addBox([width, 0.03, depth], [width / 2, -0.016, depth / 2],
-    new THREE.MeshStandardMaterial({ color: 0x0b1d24, roughness: 0.82, metalness: 0.25 }));
+    new THREE.MeshStandardMaterial({ color: isDark ? 0x0b1d24 : 0xe8f1f2, roughness: 0.82, metalness: 0.1 }));
 
   const grid: number[] = [];
   for (let position = 0; position <= width; position += cell) grid.push(position, 0.004, 0, position, 0.004, depth);
   for (let position = 0; position <= depth; position += cell) grid.push(0, 0.004, position, width, 0.004, position);
-  addLines(grid, 0x3c7e85, 0.32);
+  addLines(grid, isDark ? 0x3c7e85 : 0x769b9f, isDark ? 0.32 : 0.2);
   addLines([0, 0, 0, width, 0, 0, width, 0, 0, width, 0, depth,
     width, 0, depth, 0, 0, depth, 0, 0, depth, 0, 0, 0], 0x68d2cd, 0.7);
 
-  const routeCore = new THREE.MeshBasicMaterial({ color: 0x4cf2e4 });
-  const routeGlow = new THREE.MeshBasicMaterial({ color: 0x16d8d4, transparent: true, opacity: 0.12, depthWrite: false });
-  const roadSurface = new THREE.MeshStandardMaterial({ color: 0x122f35, roughness: 0.85 });
+  const routeCore = new THREE.MeshBasicMaterial({ color: isDark ? 0x4cf2e4 : 0x008e8b });
+  const routeGlow = new THREE.MeshBasicMaterial({ color: 0x16d8d4, transparent: true, opacity: isDark ? 0.15 : 0.2, depthWrite: false });
+  const roadSurface = new THREE.MeshStandardMaterial({ color: isDark ? 0x122f35 : 0xc3dedc, roughness: 0.85 });
   const chargers = (layout?.charging_stations ?? []).flatMap(item => {
     const point = item.access_point ?? (item.position ? [item.position[0], item.position[2]] as FloorPoint : null);
     return point ? [{ ...item, point }] : [];
@@ -156,8 +156,12 @@ export function createFactoryFloor(layout: FactoryLayout | null) {
   for (const { point } of chargers) {
     const [horizontal, vertical] = point;
     outline([horizontal - 0.38, vertical - 0.38, horizontal + 0.38, vertical + 0.38], amber);
-    addBox([0.3, 0.65, 0.12], [horizontal, 0.325, vertical - 0.28], steel);
-    addBox([0.19, 0.16, 0.02], [horizontal, 0.46, vertical - 0.21], amber);
+    addBox([0.42, 0.72, 0.16], [horizontal, 0.36, vertical - 0.29], steel);
+    addBox([0.23, 0.19, 0.025], [horizontal, 0.49, vertical - 0.20], amber);
+    addBox([0.08, 0.08, 0.025], [horizontal, 0.32, vertical - 0.20], new THREE.MeshStandardMaterial({ color: 0x22c7a5, emissive: 0x22c7a5, emissiveIntensity: 1.2 }));
+    const chargerGlow = new THREE.PointLight(0xf6c76a, 0.65, 2.8, 2);
+    chargerGlow.position.set(horizontal, 0.65, vertical - 0.26);
+    group.add(chargerGlow);
   }
   const cargoMaterial = new THREE.MeshStandardMaterial({ color: 0x6d7265, roughness: 0.9 });
   for (const rack of layout?.racks ?? []) {
