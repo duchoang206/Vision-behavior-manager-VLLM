@@ -1,0 +1,44 @@
+.root { color: var(--text-primary); padding: 20px; }
+.header, .toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.header h2 { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 19px; }
+.root p, .dialog p { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.root button, .dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); cursor: pointer; font-size: 12px; }
+.root button:disabled, .dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.root button:focus-visible, .dialog button:focus-visible, .dialog input:focus-visible, .dialog select:focus-visible { outline: 2px solid #2dd4bf; outline-offset: 2px; }
+.root button[aria-selected="true"], .dialog button[aria-pressed="true"] { color: #14b8a6; border-color: #14b8a6; background: #14b8a614; }
+.root input:not([type="checkbox"]), .root select, .dialog input:not([type="checkbox"]), .dialog select { border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--bg-card); color: var(--text-primary); max-width: 100%; min-width: 0; }
+.root label, .dialog label { display: flex; gap: 8px; align-items: center; font-size: 12px; }
+.tabs { display: flex; gap: 8px; margin: 18px 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin: 18px 0; }
+.card, .panel { border: 1px solid var(--border); background: var(--bg-card); border-radius: 10px; padding: 16px; min-width: 0; }
+.card h3, .panel h3 { margin: 0 0 14px; font-size: 15px; }
+.thumb { position: relative; aspect-ratio: 16/9; background: #07101e; border-radius: 6px; overflow: hidden; }
+.thumb img, .thumb svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1.35fr); gap: 18px; margin-top: 18px; }
+.fields { display: grid; gap: 14px; }
+.fields label { justify-content: space-between; }
+.fields input[type="number"] { width: 115px; }
+.message { color: #0d9488 !important; }
+.error { color: #f43f5e !important; padding: 10px; border-radius: 6px; background: #f43f5e0b; }
+.warning { background: #f59e0b12; border: 1px solid #f59e0b50; padding: 12px; border-radius: 8px; }
+.dialog { width: min(1400px, calc(100vw - 32px)); max-width: none; height: min(930px, calc(100dvh - 32px)); max-height: none; margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); color: var(--text-primary); }
+.dialog[open] { display: flex; flex-direction: column; }
+.dialog::backdrop { background: #020817bb; }
+.dialog .header { padding: 18px 22px; border-bottom: 1px solid var(--border); }
+.dialog .header h2 { font-size: 18px; }
+.body { padding: 18px 22px; overflow: auto; min-height: 0; }
+.editor { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; margin: 16px 0; }
+.viewport { overflow: auto; max-height: 530px; background: #07101e; border-radius: 8px; }
+.imageFrame { position: relative; min-width: 100%; }
+.imageFrame img, .imageFrame svg { position: absolute; width: 100%; height: 100%; inset: 0; user-select: none; }
+.imageFrame svg { touch-action: none; }
+.objects { display: flex; flex-direction: column; gap: 8px; max-height: 530px; overflow: auto; }
+.objects > button { justify-content: flex-start; text-align: left; }
+.objects label { display: flex; flex-direction: column; align-items: stretch; }
+.footer { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.footer .toolbar { justify-content: flex-end; }
+.primary { background: #0d9488 !important; color: white !important; border-color: #0d9488 !important; }
+.log { background: #07101e; color: #cbd5e1; padding: 14px; border-radius: 8px; max-height: 280px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
+.path { display: block; font-size: 11px; overflow-wrap: anywhere; margin: 8px 0; }
+.chart { width: 100%; height: 120px; margin: 12px 0; }
+@media(max-width: 850px) { .editor, .grid { grid-template-columns: 1fr; }.objects { max-height: 280px; }.dialog .header, .body, .footer { padding: 12px; }.root { padding: 12px; } }
