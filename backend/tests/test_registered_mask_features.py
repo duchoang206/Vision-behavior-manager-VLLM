@@ -128,7 +128,7 @@ class RegisteredMaskFeatureTests(unittest.TestCase):
         self.assertEqual({}, self.runtime.track('cam', self.frame, {}))
         self.model.forward_image.assert_not_called()
         self.runtime.track('cam', self.frame, {'Robot_1': [.1, .1, .2, .2]})
-        self.assertEqual(2, self.model.forward_image.call_count)
+        self.assertEqual(1, self.model.forward_image.call_count)
         self.assertTrue(self.runtime.cameras['cam']['objects']['Robot_1']['seeded'])
         self.assertFalse(self.predictors[1].inputs)
         self.assertFalse(self.predictors[2].inputs)

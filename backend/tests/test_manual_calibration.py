@@ -46,6 +46,29 @@ class ManualCalibrationTests(unittest.TestCase):
             online.save_manual('camera', replacement)
         self.assertEqual(config, self.calibrator.get_config('camera'))
 
+    def test_metric_length_refines_anchored_map_and_persists(self):
+        source = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+        destination = [[0., 0.], [10.1, 0.], [10.1, 5.], [0., 5.]]
+        lengths = [{'points': [[.1, .5], [.9, .5]], 'distance_m': 8.}]
+        config = prepare_manual_calibration(self.calibrator, source, destination, 'TT', self.frame, length_constraints=lengths)
+        self.assertEqual(config['length_constraints'], lengths)
+        self.assertLess(abs(config['length_errors_m'][0]), .08)
+        self.calibrator.apply_config('camera', config)
+        restored = CameraCalibrator()
+        restored.restore_config('camera', self.calibrator.get_config('camera'))
+        self.assertEqual(restored.get_config('camera')['length_constraints'], lengths)
+
+    def test_inconsistent_or_unanchored_lengths_rejected(self):
+        source = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]]
+        destination = [[0., 0.], [10., 0.], [10., 5.], [0., 5.]]
+        for points, distance in [([[.1, .5], [.9, .5]], 80), ([[.5, .5], [.5, .5]], 1), ([[.1, .5], [.9, .5]], float('nan'))]:
+            with self.assertRaises(ValueError):
+                prepare_manual_calibration(self.calibrator, source, destination, 'TT', self.frame,
+                    length_constraints=[{'points': points, 'distance_m': distance}])
+        with self.assertRaises(ValueError):
+            prepare_manual_calibration(self.calibrator, source[:3], destination[:3], 'TT', self.frame,
+                length_constraints=[{'points': [[.1, .5], [.9, .5]], 'distance_m': 8.}])
+
 
 if __name__ == '__main__':
     unittest.main()

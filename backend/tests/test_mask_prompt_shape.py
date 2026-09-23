@@ -27,6 +27,11 @@ class MaskPromptShapeTests(unittest.TestCase):
                 runtime._identity_descriptor = mock.Mock(return_value=mock.Mock())
                 frame = np.zeros((height, width, 3), dtype=np.uint8)
                 predictor = mock.Mock()
+                predictor.memory_bank = []
+                predictor.obj_idx_set = set()
+                predictor.obj_id_to_idx = {0: 0}
+                predictor.obj_idx_to_id = {0: 0}
+                predictor._max_obj_num = 1
 
                 def seed(**prompts):
                     masks = prompts["masks"]
@@ -36,14 +41,14 @@ class MaskPromptShapeTests(unittest.TestCase):
                         self.assertEqual((640, 640, 1), transformed.shape)
 
                 predictor.side_effect = seed
-                sam = SimpleNamespace(SAM2DynamicInteractivePredictor=mock.Mock(return_value=predictor))
-                with mock.patch.dict(sys.modules, {"ultralytics.models.sam": sam}), \
+                with mock.patch("core.sam2_live_predictor.LiveSAM2Predictor", return_value=predictor), \
                         mock.patch("core.registered_target_mask.decode_frame", return_value=frame):
                     runtime.configure("new-camera", [{"label": "Rack_A", "samples": [{
                         "mask": {"polygons": [[[.1, .1], [.3, .1], [.3, .4]]]}, "frame_image": "encoded"
                     }]}])
                 predictor.assert_called_once()
-                self.assertTrue(runtime.cameras["new-camera"]["objects"]["Rack_A"]["seeded"])
+                self.assertFalse(runtime.cameras["new-camera"]["objects"]["Rack_A"]["seeded"])
+                self.assertEqual([], predictor.memory_bank)
 
 
 if __name__ == "__main__":
