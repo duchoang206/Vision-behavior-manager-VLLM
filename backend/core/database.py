@@ -56,6 +56,8 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS cam_z DOUBLE PRECISION")
             cursor.execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS yaw DOUBLE PRECISION")
             cursor.execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS fov_polygon JSONB")
+            cursor.execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS calibration_saved_at DOUBLE PRECISION")
+            cursor.execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS calibration_save_id TEXT")
             
             # 2. Rules Table (ROI Intrusion, Tripwire, Dwell Time, Crowd Density)
             cursor.execute('''
@@ -168,25 +170,56 @@ class DatabaseManager:
 
     def save_calibration(self, cam_id: str, src_points: list, dst_points: list, matrix: list, cam_x: float = None, cam_y: float = None, cam_z: float = None, yaw: float = None, fov_polygon: list = None, config: dict = None):
         with self._lock:
+            conn = None
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                calib_json = json.dumps(dict(config or {}, src_points=src_points, dst_points=dst_points, matrix=matrix), allow_nan=False)
-                matrix_json = json.dumps(matrix)
-                fov_json = json.dumps(fov_polygon) if fov_polygon else None
+                saved_config = dict(config or {}, src_points=src_points, dst_points=dst_points, matrix=matrix)
+                save_id = saved_config.get("save_id")
+                saved_at = saved_config.get("persisted_at") or time.time()
+                calib_json = json.dumps(saved_config, allow_nan=False)
+                matrix_json = json.dumps(matrix, allow_nan=False)
+                fov_json = json.dumps(fov_polygon, allow_nan=False) if fov_polygon else None
                 cursor.execute('''
                     UPDATE cameras 
                     SET calibration_points = %s, homography_matrix = %s,
-                        cam_x = %s, cam_y = %s, cam_z = %s, yaw = %s, fov_polygon = %s
+                        cam_x = %s, cam_y = %s, cam_z = %s, yaw = %s, fov_polygon = %s,
+                        calibration_saved_at = %s, calibration_save_id = %s
                     WHERE id = %s
-                ''', (calib_json, matrix_json, cam_x, cam_y, cam_z, yaw, fov_json, cam_id))
+                ''', (calib_json, matrix_json, cam_x, cam_y, cam_z, yaw, fov_json,
+                      saved_at, save_id, cam_id))
                 saved = cursor.rowcount == 1
                 conn.commit()
-                conn.close()
                 return saved
             except Exception as e:
+                if conn is not None:
+                    conn.rollback()
                 logger.error(f"Error saving calibration: {e}")
                 return False
+            finally:
+                if conn is not None:
+                    conn.close()
+
+    def get_calibration(self, cam_id: str):
+        connection = self._get_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT calibration_points, homography_matrix, calibration_saved_at, calibration_save_id FROM cameras WHERE id=%s", (cam_id,))
+                row = cursor.fetchone()
+                if row is None:
+                    raise KeyError("Camera không tồn tại trong PostgreSQL.")
+                value, matrix, saved_at, save_id = row
+                result = json.loads(value) if isinstance(value, str) else value
+                if not result and matrix:
+                    result = {"matrix": json.loads(matrix) if isinstance(matrix, str) else matrix}
+                if not result:
+                    return result
+                result = dict(result)
+                result.setdefault("persisted_at", saved_at)
+                result.setdefault("save_id", save_id)
+                return result
+        finally:
+            connection.close()
 
     def get_all_cameras(self) -> List[dict]:
         with self._lock:
@@ -311,11 +344,10 @@ class DatabaseManager:
             try:
                 conn = self._get_connection()
                 cursor = conn.cursor()
-                now_str = datetime.now().strftime('%Y%m%d_%H%M%S')
                 cam = event.get("cam_id", "cam")
                 rtype = event.get("rule_type", "intrusion")
                 rstat = event.get("roi_status") or event.get("status") or ("CARFULL" if rtype == "intrusion" else "ALERT")
-                video_file = event.get("video_file") or f"{now_str}_{cam}_{rtype}_{rstat}.mp4"
+                video_file = event.get("video_file")
 
                 cursor.execute('''
                     INSERT INTO events (cam_id, global_id, rule_id, rule_type, roi_status, severity, description, snapshot_bbox, floor_pos, video_file)
@@ -429,7 +461,7 @@ class DatabaseManager:
 
                 # 4. Recent events
                 cursor.execute('''
-                    SELECT cam_id, rule_type, description, severity, timestamp, video_file, roi_status, global_id 
+                    SELECT cam_id, rule_type, description, severity, timestamp, video_file, roi_status, global_id, id
                     FROM events 
                     ORDER BY timestamp DESC LIMIT 10
                 ''')
@@ -446,6 +478,7 @@ class DatabaseManager:
                         rstat = row[6]
                         gid = row[7] or 0
                         recent_events.append({
+                            "id": row[8],
                             "camera": cam_id,
                             "type": rule_type,
                             "description": desc,

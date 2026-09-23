@@ -1,0 +1,4 @@
+sample_id,label,category,camera_id,scenario,iou,match_biou,confidence,has_native_mask
+46f881e88dd64a3f9ede7e30f2e0048f,Robot_28100,robot,86c5119c,rotation_profile,0.965,0.7591,0.7635,True
+bda99e3bad2d49b8bfc974987d8b6bc1,Robot_6868,robot,86c5119c,rotation_profile,0.9477,0.7439,0.946,True
+c033ed1fee69428fb61ddb92e3639488,Robot_2001,robot,86c5119c,rotation_profile,0.9192,0.5504,0.8804,True

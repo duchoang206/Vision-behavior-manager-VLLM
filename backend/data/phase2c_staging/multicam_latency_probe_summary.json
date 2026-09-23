@@ -1,0 +1,136 @@
+{
+  "num_cameras": 7,
+  "cameras": [
+    "06e9e5b9",
+    "1ac2ffac",
+    "b1269e28",
+    "b5e8f409",
+    "c7e22c1f",
+    "d1f37ed1",
+    "e0606b55"
+  ],
+  "duration_seconds": 60,
+  "warmup_seconds": 5,
+  "total_buffers": 892,
+  "pad_residence_latency": {
+    "n_samples": 875,
+    "mean_ms": 216.47,
+    "median_ms": 219.9,
+    "p95_ms": 250.51,
+    "p99_ms": 266.93,
+    "min_ms": 62.82,
+    "max_ms": 296.79
+  },
+  "frame_compute_delta": {
+    "n_samples": 874,
+    "mean_ms": 72.8,
+    "median_ms": 75.4,
+    "p95_ms": 88.44,
+    "p99_ms": 94.31,
+    "min_ms": 42.23,
+    "max_ms": 115.77,
+    "effective_fps_total": 13.74,
+    "effective_fps_per_camera": 1.96
+  },
+  "objects_stats": {
+    "mean_per_frame": 0.88,
+    "median_per_frame": 1.0,
+    "min": 0,
+    "max": 2,
+    "per_source": {
+      "06e9e5b9": {
+        "n_frames": 133,
+        "mean_objs": 1.41,
+        "max_objs": 2,
+        "min_objs": 1
+      },
+      "1ac2ffac": {
+        "n_frames": 27,
+        "mean_objs": 0.7,
+        "max_objs": 1,
+        "min_objs": 0
+      },
+      "b1269e28": {
+        "n_frames": 133,
+        "mean_objs": 1.6,
+        "max_objs": 2,
+        "min_objs": 1
+      },
+      "b5e8f409": {
+        "n_frames": 133,
+        "mean_objs": 0.68,
+        "max_objs": 2,
+        "min_objs": 0
+      },
+      "c7e22c1f": {
+        "n_frames": 133,
+        "mean_objs": 0.0,
+        "max_objs": 0,
+        "min_objs": 0
+      },
+      "d1f37ed1": {
+        "n_frames": 133,
+        "mean_objs": 0.53,
+        "max_objs": 1,
+        "min_objs": 0
+      },
+      "e0606b55": {
+        "n_frames": 133,
+        "mean_objs": 1.12,
+        "max_objs": 2,
+        "min_objs": 1
+      }
+    }
+  },
+  "per_source": {
+    "06e9e5b9": {
+      "n_samples": 133,
+      "mean_ms": 230.24,
+      "median_ms": 228.8,
+      "p95_ms": 252.3,
+      "max_ms": 286.59
+    },
+    "1ac2ffac": {
+      "n_samples": 27,
+      "mean_ms": 234.52,
+      "median_ms": 229.97,
+      "p95_ms": 254.4,
+      "max_ms": 263.25
+    },
+    "b1269e28": {
+      "n_samples": 133,
+      "mean_ms": 239.8,
+      "median_ms": 237.9,
+      "p95_ms": 263.86,
+      "max_ms": 296.79
+    },
+    "b5e8f409": {
+      "n_samples": 133,
+      "mean_ms": 234.07,
+      "median_ms": 233.11,
+      "p95_ms": 260.24,
+      "max_ms": 276.89
+    },
+    "c7e22c1f": {
+      "n_samples": 133,
+      "mean_ms": 205.55,
+      "median_ms": 204.82,
+      "p95_ms": 230.93,
+      "max_ms": 245.3
+    },
+    "d1f37ed1": {
+      "n_samples": 133,
+      "mean_ms": 194.09,
+      "median_ms": 194.43,
+      "p95_ms": 213.48,
+      "max_ms": 233.14
+    },
+    "e0606b55": {
+      "n_samples": 133,
+      "mean_ms": 200.75,
+      "median_ms": 200.41,
+      "p95_ms": 220.21,
+      "max_ms": 244.68
+    }
+  }
+}

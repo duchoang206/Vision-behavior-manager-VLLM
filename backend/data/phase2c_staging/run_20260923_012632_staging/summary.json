@@ -1,0 +1,37 @@
+{
+  "run_id": "run_20260923_012632_staging",
+  "duration_steady_s": 5.04,
+  "cameras": [
+    "06e9e5b9",
+    "1ac2ffac",
+    "b1269e28",
+    "c7e22c1f",
+    "d1f37ed1",
+    "e0606b55"
+  ],
+  "fps_by_camera": {
+    "06e9e5b9": 0.4,
+    "1ac2ffac": 1.19,
+    "b1269e28": 0.99,
+    "c7e22c1f": 3.77,
+    "d1f37ed1": 0.4,
+    "e0606b55": 0.6
+  },
+  "latency": {
+    "mean_ms": 0.67,
+    "p50_ms": 0.05,
+    "p95_ms": 0.09,
+    "p99_ms": 22.91,
+    "max_ms": 22.91
+  },
+  "freezes": {
+    "pipeline_freezes_ge_200ms": 0,
+    "streaming_transport_gaps_ge_150ms": 7,
+    "sensor_drops": 7
+  },
+  "objects": {
+    "total_tracked": 2,
+    "with_native_mask": 2,
+    "mean_contract_iou": 0.991
+  }
+}

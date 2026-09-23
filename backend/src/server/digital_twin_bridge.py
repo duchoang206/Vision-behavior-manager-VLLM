@@ -14,6 +14,9 @@ from fastapi import WebSocket
 from src.controller.registry import target_registry
 from src.controller.rack_association import RackAssociationEngine
 from core.camera_calibrator import camera_calibrator
+from core.identity_utils import robot_number_from_label
+from core.robot_spatial_identity import robot_identity, robot_spatial_identity, spatial_verification
+from core.metadata_broadcaster import close_metadata_socket
 
 try:
     from core.fms_bridge import fms_bridge
@@ -60,6 +63,40 @@ class DigitalTwinBridge:
             self.active_websockets.remove(websocket)
             print(f"🔌 [DigitalTwin] Client disconnected. Remaining: {len(self.active_websockets)}")
 
+    def _robot_spatial_check(self, cam_id, label, object_data, bbox, now):
+        if robot_identity({"label": label, "category": "robot"}) is None:
+            return None
+        existing = (object_data or {}).get("spatial_identity")
+        if isinstance(existing, dict) and existing.get("robot_id") == robot_identity({"label": label, "category": "robot"}):
+            return existing
+        try:
+            targets = target_registry.get_all_targets()
+            if not any(target.get("label") == label for target in targets):
+                targets.append({"label": label, "category": "robot"})
+            raw_time = (object_data or {}).get("observed_at", now)
+            observed_at = float(raw_time)
+            if observed_at >= 1e11:
+                observed_at /= 1000.0
+            context = robot_spatial_identity.context(cam_id, targets, observed_at, now=now)
+            return spatial_verification(context, label, bbox)
+        except (TypeError, ValueError, KeyError, IndexError, OverflowError):
+            return {"checked": False, "accepted": None, "robot_id": robot_number_from_label(label),
+                    "reason": "spatial_check_error"}
+
+    @staticmethod
+    def _target_category(label, targets):
+        for target in targets:
+            if str(target.get("label") or "").casefold() == str(label or "").casefold():
+                return (target.get("category") or "").lower()
+        lower = str(label or "").lower()
+        if lower.startswith("robot"):
+            return "robot"
+        if lower.startswith("rack") or lower.startswith("shelf"):
+            return "rack"
+        if lower.startswith("person") or lower.startswith("human"):
+            return "person"
+        return None
+
     def update_vision_track(
         self,
         cam_id: str,
@@ -75,6 +112,9 @@ class DigitalTwinBridge:
         Updates an entity state from camera vision detection + Homography projection.
         """
         now = time.time()
+        model_track = bool((object_data or {}).get("model_id"))
+        if model_track and (object_data or {}).get("category") not in {"person", "robot", "rack"}:
+            return
         
         # 1. Coordinate projection (Camera pixel -> Metric World 3D (X, Z))
         spatial = camera_calibrator.project_ground_point(cam_id, norm_u, norm_v)
@@ -85,10 +125,45 @@ class DigitalTwinBridge:
         # 2. Re-ID matching against Registered Fleet (e.g. Robot_9001)
         matched_label = None
         identity_label = (object_data or {}).get("label") or (raw_class if raw_class.startswith(("Robot_", "Rack_", "Person_")) else None)
+        if model_track:
+            identity_label = object_data.get("label")
+            if identity_label and object_data.get("category") == "robot":
+                number = robot_number_from_label(identity_label)
+                identity_label = f"Robot_{number}" if number is not None else None
+            reid_vector = None
         if not identity_label and reid_vector and len(reid_vector) == 512:
             matched_label, score = target_registry.match_reid(reid_vector, threshold=0.65)
             
         cls_lower = raw_class.lower()
+        if model_track:
+            cls_lower = object_data["category"]
+        try:
+            registered_targets = target_registry.get_all_targets()
+        except Exception:
+            registered_targets = []
+        expected_category = (object_data or {}).get("category")
+        if not expected_category:
+            expected_category = "person" if any(token in cls_lower for token in ("person", "human", "worker")) else (
+                "rack" if any(token in cls_lower for token in ("rack", "pallet", "storage")) else "robot"
+            )
+        if matched_label:
+            matched_category = self._target_category(matched_label, registered_targets)
+            if matched_category and matched_category != str(expected_category).lower():
+                matched_label = None
+
+        robot_label = matched_label or identity_label
+        robot_spatial = None
+        if robot_identity({"label": robot_label, "category": "robot"}) is not None:
+            if object_data and all(key in object_data for key in ("x", "y", "w", "h")):
+                robot_bbox = [object_data["x"], object_data["y"], object_data["w"], object_data["h"]]
+            else:
+                robot_bbox = [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]]
+            robot_spatial = self._robot_spatial_check(cam_id, robot_label, object_data, robot_bbox, now)
+            if robot_spatial.get("accepted") is False:
+                if matched_label == robot_label:
+                    matched_label = None
+                if identity_label == robot_label:
+                    identity_label = None
         
         # 3. Categorize entity
         if 'person' in cls_lower or 'human' in cls_lower or 'worker' in cls_lower:
@@ -209,6 +284,11 @@ class DigitalTwinBridge:
                 "reid_matched": bool(matched_label),
                 "last_seen": now
             }
+            if model_track:
+                self.vision_robots[robot_id]["model_id"] = object_data["model_id"]
+                self.vision_robots[robot_id]["fms_identity"] = identity_label
+            if robot_spatial is not None:
+                self.vision_robots[robot_id]["spatial_identity"] = robot_spatial
 
     def _calc_motion(self, entity_id: str, x: float, z: float, now: float) -> Tuple[float, float]:
         """Calculates smoothed heading (radians) and velocity (m/s) from trajectory history"""
@@ -286,6 +366,11 @@ class DigitalTwinBridge:
                 fx, fz = fms_r["position"][0], fms_r["position"][2]
                 for vk, vt in self.vision_robots.items():
                     if vk not in matched_vision_keys:
+                        if vt.get("model_id"):
+                            continue
+                        spatial_identity = vt.get("spatial_identity") or {}
+                        if spatial_identity and spatial_identity.get("accepted") is not True:
+                            continue
                         vx, vz = vt["position"][0], vt["position"][2]
                         if math.hypot(fx - vx, fz - vz) < 1.3:
                             vis_track = vt
@@ -421,14 +506,17 @@ class DigitalTwinBridge:
                 msg = json.dumps(payload)
                 
                 dead_sockets = set()
-                for ws in self.active_websockets:
+
+                async def send_one(ws):
                     try:
-                        await ws.send_text(msg)
+                        await asyncio.wait_for(ws.send_text(msg), timeout=0.10)
                     except Exception:
                         dead_sockets.add(ws)
-                        
+
+                await asyncio.gather(*(send_one(ws) for ws in list(self.active_websockets)), return_exceptions=True)
                 for dead in dead_sockets:
                     self.unregister_client(dead)
+                await asyncio.gather(*(close_metadata_socket(dead, reason="Digital twin send stalled") for dead in dead_sockets))
                     
             elapsed = time.time() - start_time
             sleep_time = max(0.005, interval - elapsed)

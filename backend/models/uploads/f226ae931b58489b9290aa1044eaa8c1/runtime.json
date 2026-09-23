@@ -1,0 +1,1 @@
+{"model_id": "f226ae931b58489b9290aa1044eaa8c1", "generation": "bbd41af4", "cameras": ["86c5119c"], "config": "/app/models/uploads/f226ae931b58489b9290aa1044eaa8c1/nvinfer.txt", "tracker": "/app/models/uploads/f226ae931b58489b9290aa1044eaa8c1/tracker.yml", "labels": ["Rack", "Tracking-ROBOT"], "categories": ["rack", "robot"]}

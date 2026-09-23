@@ -1,0 +1,15 @@
+camera,frame_num,previous_frame,tracker_gap_ms,pts_gap_ms,gap_type,warmup
+b1269e28,1,0,415.865,49.237,streaming_transport_gap,False
+1ac2ffac,1,0,455.502,39.909,streaming_transport_gap,False
+b1269e28,2,1,668.417,579.779,sensor_drop_gap,False
+c7e22c1f,16,15,1087.352,159.961,sensor_drop_gap,False
+e0606b55,1,0,852.673,678.828,sensor_drop_gap,False
+1ac2ffac,4,3,814.308,39.845,streaming_transport_gap,False
+b1269e28,3,2,804.854,48.647,streaming_transport_gap,False
+c7e22c1f,17,16,799.248,559.336,sensor_drop_gap,False
+e0606b55,2,1,806.888,40.0,streaming_transport_gap,False
+06e9e5b9,1,0,978.528,39.359,streaming_transport_gap,False
+1ac2ffac,5,4,978.224,39.824,streaming_transport_gap,False
+b1269e28,4,3,1133.409,692.572,sensor_drop_gap,False
+c7e22c1f,18,17,1133.556,719.996,sensor_drop_gap,False
+d1f37ed1,1,0,1209.708,319.622,sensor_drop_gap,False

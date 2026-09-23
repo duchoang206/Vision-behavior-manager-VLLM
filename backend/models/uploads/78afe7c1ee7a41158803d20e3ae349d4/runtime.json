@@ -1,0 +1,1 @@
+{"model_id": "78afe7c1ee7a41158803d20e3ae349d4", "generation": "fa08d3c3", "cameras": ["06e9e5b9", "1ac2ffac", "86c5119c", "8b5c6309", "b1269e28", "d1f37ed1"], "config": "/app/models/uploads/78afe7c1ee7a41158803d20e3ae349d4/nvinfer.txt", "tracker": "/app/models/uploads/78afe7c1ee7a41158803d20e3ae349d4/tracker.yml", "labels": ["pallet"], "categories": ["rack"]}

@@ -23,7 +23,8 @@ class TargetRegistry:
     Persistent AMR Robot Identity Registry.
     Stores 512-dimensional Re-ID signatures and matches incoming tracks in real-time.
     """
-    def __init__(self, persistence_file: Optional[str] = None):
+    def __init__(self, persistence_file: Optional[str] = None, identity_metrics=None):
+        self.identity_metrics = identity_metrics
         if persistence_file:
             self.persist_path = Path(persistence_file)
         else:
@@ -474,6 +475,11 @@ class TargetRegistry:
                 target_data["rack_3d_size"] = rack_3d_size[:3]  # [width_m, depth_m, height_m]
             
         self.save_to_disk()
+        if self.identity_metrics is not None:
+            try:
+                self.identity_metrics.learn(label, cam_id, vec, embedding_type, archived.get("sample_ref"))
+            except Exception as error:
+                self.identity_metrics.last_error = str(error)
         return True
 
     def match_reid(
@@ -496,9 +502,17 @@ class TargetRegistry:
         
         best_label = None
         best_score = -1.0
+        verifications = self.identity_metrics.scores(q_vec, [data.get("label", key.split("::")[-1])
+            for key, data in self.targets.items() if data.get("embedding_type") == "reid_512"]) if self.identity_metrics else {}
         
         for label, data in self.targets.items():
             if data.get("embedding_type", "legacy_hsv") != "reid_512":
+                continue
+            name = data.get("label", label.split("::")[-1])
+            verification = verifications.get(name)
+            if verification is not None:
+                if verification["accepted"] and verification["score"] > best_score:
+                    best_label, best_score = name, verification["score"]
                 continue
             gallery = data.get("vectors") or [data["vector"]]
             for t_vec in gallery:
@@ -615,6 +629,9 @@ class TargetRegistry:
                                     
                         if best_gallery_sim > -1.0:
                             lbl = data.get("label", key.split("::")[-1])
+                            verification = self.identity_metrics.verify(lbl, q_vec, "reid_512") if self.identity_metrics else None
+                            if verification is not None:
+                                best_gallery_sim = verification.get("score", -1.0) if verification["accepted"] else -1.0
                             reid_scores[lbl] = round(best_gallery_sim, 4)
                             if best_gallery_sim > best_reid_score:
                                 best_reid_score = best_gallery_sim
@@ -821,6 +838,8 @@ class TargetRegistry:
 
         if deleted:
             self.save_to_disk()
+            if self.identity_metrics is not None:
+                self.identity_metrics.forget(label, cam_id)
             return True
         return False
 
@@ -918,4 +937,6 @@ class TargetRegistry:
 
 
 # Singleton target registry instance
-target_registry = TargetRegistry()
+from core.registered_identity_metrics import registered_identity_metrics
+
+target_registry = TargetRegistry(identity_metrics=registered_identity_metrics)

@@ -1,0 +1,1 @@
+{"labels": ["pallet"], "input": "images", "output": "output0", "shape": [1, 3, 640, 640], "output_shape": [1, 5, 8400], "sha256": "7611b046ab9c12254a62776c23e72d0095d5c13552e55904a3f690b0bdd22074", "contract": "yolo_raw_v8_v11", "precision": "fp16", "labels_source": "onnx_metadata"}

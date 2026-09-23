@@ -1,0 +1,77 @@
+{
+  "reference_type": "pytorch_sam2_golden",
+  "reference_note": "IoU computed vs CudaMaskRuntime.preview (PyTorch SAM2), NOT user-verified ground-truth labels",
+  "latency_note": "Latency measured under batch-size=1, single video. NOT representative of 5-camera production load.",
+  "total_samples": 60,
+  "has_native_count": 60,
+  "has_native_rate": 1.0,
+  "video_distribution": {
+    "cam_86c5119c.mp4": 58,
+    "cam_c7e22c1f.mp4": 2
+  },
+  "gpu_trt_latency": {
+    "mean_ms": 276.54,
+    "median_ms": 282.08,
+    "p95_ms": 309.45,
+    "p99_ms": 330.62,
+    "min_ms": 154.17,
+    "max_ms": 382.72
+  },
+  "gpu_trt_frame_compute_latency": {
+    "mean_ms": 92.81,
+    "median_ms": 93.94,
+    "p95_ms": 109.78,
+    "p99_ms": 114.47,
+    "min_ms": 55.86,
+    "max_ms": 121.56
+  },
+  "python_parse_latency": {
+    "mean_ms": 0.31,
+    "median_ms": 0.298,
+    "max_ms": 2.054
+  },
+  "iou_distribution": {
+    "mean": 0.958,
+    "median": 0.9609,
+    "min": 0.8913,
+    "max": 0.9669,
+    "p05": 0.9502,
+    "p10": 0.954,
+    "p25": 0.9567,
+    "p50": 0.9609,
+    "p75": 0.9638,
+    "p90": 0.9655,
+    "p95": 0.9663,
+    "p99": 0.9669
+  },
+  "cases_below_70_count": 0,
+  "cases_below_70_rate": 0.0,
+  "by_scenario": {
+    "rotation_profile": {
+      "count": 58,
+      "mean_iou": 0.9603,
+      "median_iou": 0.9611,
+      "min_iou": 0.9478
+    },
+    "normal_active": {
+      "count": 2,
+      "mean_iou": 0.8916,
+      "median_iou": 0.8919,
+      "min_iou": 0.8913
+    }
+  },
+  "by_label": {
+    "Robot_6868": {
+      "count": 58,
+      "mean_iou": 0.9603,
+      "median_iou": 0.9611,
+      "min_iou": 0.9478
+    },
+    "Robot_28100": {
+      "count": 2,
+      "mean_iou": 0.8916,
+      "median_iou": 0.8919,
+      "min_iou": 0.8913
+    }
+  }
+}
