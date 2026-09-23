@@ -38,7 +38,7 @@ export default function ChatbotWidget() {
     setMessages((prev) => [...prev, botMsg]);
 
     try {
-      const apiHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.5.104') : '192.168.5.104';
+      const apiHost = typeof window !== 'undefined' ? (window.location.hostname || '192.168.0.84') : '192.168.0.84';
       const response = await fetch(`http://${apiHost}:8000/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

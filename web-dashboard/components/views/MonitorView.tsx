@@ -1,18 +1,28 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useLanguage } from '../LanguageContext';
 import { useCameras, Camera } from '../CameraContext';
 import { useAppTheme } from '../ThemeContext';
 import { RegisteredMask, validRegisteredMask } from '../../lib/registered-mask';
-import { LiveRegisteredMask, MASK_BRIDGE_MS, metadataReceivedAt, updateLiveRegisteredMask } from '../../lib/live-registered-mask';
+import { LiveRegisteredMask, isLiveRegisteredMask, metadataReceivedAt, updateLiveRegisteredMask } from '../../lib/live-registered-mask';
+import { segmentationColors, segmentationPath } from '../../lib/segmentation-overlay';
 import { connectRealtimeSocket, createMetadataClock } from '../../lib/realtime-socket';
-import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radio, Boxes, Package, CheckCircle2, Grid3X3, Bot, Tag, Sparkles, Trash2, X, Check, Search, Sliders } from 'lucide-react';
+import { connectRealtimeVideo } from '../../lib/realtime-video';
+import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radio, Boxes, Package, Grid3X3, Bot, Sparkles, Trash2, X, Check, Search, Sliders } from 'lucide-react';
 
+const MonitorLabelDialog = dynamic(() => import('./MonitorLabelDialog'), { ssr: false });
+const ActiveLearningDialog = dynamic(() => import('./ActiveLearningDialog'), { ssr: false });
+import MonitorChatAssistant from './MonitorChatAssistant';
 
 type TrackedObject = {
   id: number;
-  local_id?: number;
+  model_id?: string;
+  identity_verified?: boolean;
+  label_prompt_id?: string;
+  category?: string;
+  local_id?: string | number;
   class: string;
   label?: string;
   mask?: RegisteredMask | null;
@@ -52,6 +62,10 @@ type LiveAlert = {
 
 type InterpolatedTrack = {
   id: number;
+  local_id?: string | number;
+  model_id?: string;
+  generation?: string;
+  labelPrompt?: boolean;
   class?: string;
   label?: string;
   maskFrame?: LiveRegisteredMask | null;
@@ -119,20 +133,7 @@ type CameraRuleResponse = {
   threshold?: number;
 };
 
-type RegisteredTargetItem = {
-  label: string;
-  cam_id?: string;
-  class_name?: string;
-  category?: string;
-  last_cam?: string;
-  samples_count?: number;
-};
-
 type MapOverviewItem = Record<string, unknown>;
-
-type RegistryTargetsResponse = {
-  targets?: RegisteredTargetItem[];
-};
 
 const resolveStreamCamId = (rawCamId: string, index: number, cameras: Camera[]) => {
   if (cameras.some(c => c.id === rawCamId)) return rawCamId;
@@ -142,14 +143,14 @@ const resolveStreamCamId = (rawCamId: string, index: number, cameras: Camera[]) 
   return rawCamId;
 };
 
-const isPersonClass = (className?: string) => (className || '').toLowerCase().includes('person');
+const isPersonClass = (className?: string) => /person|human|worker|pedestrian/i.test(className || '');
 const isRobotClass = (className?: string) => {
   const c = (className || '').toLowerCase();
-  return c.includes('robot') || c.includes('agv') || c.includes('amr') || c.includes('rack');
+  return /robot|agv|amr|forklift|rack|shelf|pallet|kệ/.test(c);
 };
 const hasRegisteredLabel = (label?: string) => Boolean(label && label.trim() !== '');
-const shouldShowTrackIdentity = (className?: string, label?: string) =>
-  isPersonClass(className) || (hasRegisteredLabel(label) && isRobotClass(className));
+const shouldShowTrackIdentity = (className?: string, modelId?: string) =>
+  Boolean(modelId) || isPersonClass(className);
 const isValidPointPolygon = (points?: number[][]) =>
   Array.isArray(points) && points.length >= 3 && points.every(p => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]));
 const isValidNormPolygon = (points?: number[][]) =>
@@ -187,147 +188,133 @@ const mergeRois = (existing: ROIState[] = [], incoming: ROIState[] = []) => {
   return filterRealConfiguredRois(Array.from(byId.values()));
 };
 
-function CameraStreamCard({
+const CameraStreamCard = React.memo(function CameraStreamCard({
   cam,
   hostName,
   isVisible,
+  isActive,
   activeTab,
   metadataMap,
   roisMap,
   metadataCount,
-  metadataConnected
+  metadataConnected,
+  onLabel,
+  onLearn
 }: {
   cam: Camera;
   hostName: string;
   isVisible: boolean;
+  isActive: boolean;
   activeTab: string;
   metadataMap: React.MutableRefObject<Map<string, Map<number, InterpolatedTrack>>>;
   roisMap: React.MutableRefObject<Map<string, ROIState[]>>;
   metadataCount: number;
   metadataConnected: boolean;
+  onLabel: (cameraId: string) => void;
+  onLearn: (cameraId: string) => void;
 }) {
+  const { isDark } = useAppTheme();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [useIframeFallback, setUseIframeFallback] = useState(false);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const visibleRef = useRef(isActive && isVisible);
+  const [maskAgeMs, setMaskAgeMs] = useState<number | null>(null);
 
-  // 1. Ultra-Low-Latency Direct WHEP WebRTC Connection
-	  useEffect(() => {
-	    let isCancelled = false;
-	    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  useEffect(() => { visibleRef.current = isActive && isVisible; }, [isActive, isVisible]);
 
-    const connectWHEP = async () => {
-      if (pcRef.current) {
-        try { pcRef.current.close(); } catch (e) {}
-        pcRef.current = null;
-      }
-
-      try {
-        const pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        });
-        pcRef.current = pc;
-
-        pc.addTransceiver('video', { direction: 'recvonly' });
-        pc.addTransceiver('audio', { direction: 'recvonly' });
-
-        pc.ontrack = (event) => {
-          if (videoRef.current && event.streams[0]) {
-            videoRef.current.srcObject = event.streams[0];
-            videoRef.current.play().catch(() => {});
-            setIsPlaying(true);
-          }
-        };
-
-        pc.oniceconnectionstatechange = () => {
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-            setIsPlaying(false);
-	            if (!isCancelled) {
-	              if (reconnectTimeout) clearTimeout(reconnectTimeout);
-	              reconnectTimeout = setTimeout(connectWHEP, 1500);
-	            }
-          }
-        };
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        // Fetch WHEP Answer from MediaMTX
-        const whepUrl = `http://${hostName}:8081/${cam.id}/whep`;
-        const res = await fetch(whepUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/sdp' },
-          body: offer.sdp
-        });
-
-        if (!res.ok) {
-          throw new Error(`WHEP HTTP ${res.status}`);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    return connectRealtimeVideo({
+      video,
+      url: `http://${hostName}:8081/${cam.id}/whep`,
+      isVisible: () => visibleRef.current,
+      onPlayingChange: setIsPlaying,
+      onReset: () => {
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext('2d');
+        if (context && canvas) {
+          context.setTransform(1, 0, 0, 1, 0, 0);
+          context.clearRect(0, 0, canvas.width, canvas.height);
         }
-
-        const answerSdp = await res.text();
-        if (!isCancelled && pc.signalingState !== 'closed') {
-          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerSdp }));
-        }
-      } catch (err) {
-        if (!isCancelled) {
-          // Fallback to clean iframe if direct WHEP endpoint fails
-	          setUseIframeFallback(true);
-	          if (reconnectTimeout) clearTimeout(reconnectTimeout);
-	          reconnectTimeout = setTimeout(connectWHEP, 4000);
-	        }
-      }
-    };
-
-    connectWHEP();
-
-	    return () => {
-	      isCancelled = true;
-	      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (pcRef.current) {
-        try { pcRef.current.close(); } catch (e) {}
-        pcRef.current = null;
-      }
-    };
+      },
+    });
   }, [cam.id, hostName]);
 
-  // 2. 60 FPS Real-time Tracking & ROI Canvas Render
   useEffect(() => {
-    let animId: number;
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!canvas || !container) return;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const clear = () => {
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    };
+    if (!isActive || !isVisible) {
+      clear();
+      return;
+    }
+    let animId = 0;
+    let videoFrameId = 0;
+    let disposed = false;
+    let lastVideoAt = performance.now();
+    let lastStatusAt = 0;
+    let width = container.clientWidth;
+    let height = container.clientHeight;
+    let paths = new WeakMap<RegisteredMask, Path2D>();
+    let sourceSize = '';
+    const resize = new ResizeObserver(entries => {
+      const bounds = entries[0]?.contentRect;
+      if (!bounds) return;
+      width = bounds.width;
+      height = bounds.height;
+      paths = new WeakMap();
+    });
+    resize.observe(container);
 
     const render = () => {
-      const canvas = canvasRef.current;
-      const container = containerRef.current;
+      if (document.hidden || width < 10 || height < 10 || !video?.srcObject || video.readyState < 2) {
+        clear();
+        return;
+      }
       if (canvas && container) {
-        const rect = container.getBoundingClientRect();
-        const rw = Math.round(rect.width);
-        const rh = Math.round(rect.height);
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const rw = Math.round(width * pixelRatio);
+        const rh = Math.round(height * pixelRatio);
         if (rw > 10 && rh > 10 && (canvas.width !== rw || canvas.height !== rh)) {
           canvas.width = rw;
           canvas.height = rh;
+          paths = new WeakMap();
         }
 
-        const ctx = canvas.getContext('2d');
+        const ctx = context;
         if (ctx && canvas.width > 0 && canvas.height > 0) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          const video = videoRef.current;
+          clear();
+          ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
           const sourceW = video?.videoWidth || 16;
           const sourceH = video?.videoHeight || 9;
+          const currentSourceSize = `${sourceW}:${sourceH}`;
+          if (currentSourceSize !== sourceSize) {
+            sourceSize = currentSourceSize;
+            paths = new WeakMap();
+          }
           const sourceAspect = sourceW / Math.max(1, sourceH);
-          const canvasAspect = canvas.width / Math.max(1, canvas.height);
-          let videoDrawW = canvas.width;
-          let videoDrawH = canvas.height;
+          const canvasAspect = width / Math.max(1, height);
+          let videoDrawW = width;
+          let videoDrawH = height;
           let videoOffsetX = 0;
           let videoOffsetY = 0;
           if (sourceAspect > canvasAspect) {
-            videoDrawW = canvas.width;
-            videoDrawH = canvas.width / sourceAspect;
-            videoOffsetY = (canvas.height - videoDrawH) / 2;
+            videoDrawW = width;
+            videoDrawH = width / sourceAspect;
+            videoOffsetY = (height - videoDrawH) / 2;
           } else {
-            videoDrawH = canvas.height;
-            videoDrawW = canvas.height * sourceAspect;
-            videoOffsetX = (canvas.width - videoDrawW) / 2;
+            videoDrawH = height;
+            videoDrawW = height * sourceAspect;
+            videoOffsetX = (width - videoDrawW) / 2;
           }
           const mapVideoX = (x: number) => videoOffsetX + x * videoDrawW;
           const mapVideoY = (y: number) => videoOffsetY + y * videoDrawH;
@@ -335,6 +322,7 @@ function CameraStreamCard({
           // --- A. Tracked Objects (BBox + Tags only, no ROI overlays on stream) ---
           const camTracks = metadataMap.current.get(cam.id);
           const now = Date.now();
+          let oldestMaskAge: number | null = null;
 
           if (camTracks) {
             camTracks.forEach((track, id) => {
@@ -358,45 +346,51 @@ function CameraStreamCard({
               const ph = track.curH * videoDrawH;
 
               // Class & label formatting
-              const rawClass = (track.label || track.class || 'Object').toLowerCase();
+              const rawClass = (track.class || 'Object').toLowerCase();
               const isRobot = rawClass.includes('robot');
               const isRack = rawClass.includes('rack');
               const isPerson = rawClass.includes('person') || rawClass.includes('human') || rawClass.includes('worker');
               const isFallen = Boolean(track.fall_detected || track.posture === 'fallen');
               const hasCustomLabel = hasRegisteredLabel(track.label);
-              const registeredTarget = !isPerson && hasCustomLabel && isRobotClass(track.class);
-              const mask = track.maskFrame && now - track.maskFrame.receivedAt <= MASK_BRIDGE_MS
+              const registeredTarget = Boolean(track.model_id) && (hasCustomLabel || isRobotClass(track.class));
+              const mask = isLiveRegisteredMask(track.maskFrame, now)
                 ? track.maskFrame.mask : null;
               const drawMask = registeredTarget && Boolean(mask);
-              if (!shouldShowTrackIdentity(track.class, track.label)) {
+              if (!shouldShowTrackIdentity(track.class, track.model_id)) {
                 return;
               }
               const displayClass = isRobot ? 'robot' : (isRack ? 'rack' : rawClass);
-              const label = isPerson ? `person #${track.id}`
-                : hasCustomLabel ? (isRobot ? track.label!.toLowerCase() : track.label!)
-                  : `${displayClass} #${track.id}`;
+              const label = hasCustomLabel ? track.label!
+                : `${displayClass} #${track.local_id ?? track.id}`;
               const displayLabel = registeredTarget && !drawMask ? `${label} · chờ mask` : label;
 
-              // Dynamic Accent Colors (Cyan for verified registered targets, Rose for robots, Indigo for racks)
-              const strokeColor = isFallen ? '#ef4444' : hasCustomLabel ? '#22d3ee' : (isRobot ? '#f43f5e' : isPerson ? '#22c55e' : '#6366f1');
-              const fillColor = isFallen ? 'rgba(239, 68, 68, 0.28)' : hasCustomLabel ? 'rgba(34, 211, 238, 0.22)' : (isRobot ? 'rgba(244, 63, 94, 0.20)' : isPerson ? 'rgba(34, 197, 94, 0.15)' : 'rgba(99, 102, 241, 0.15)');
+              const colors = segmentationColors(track.label || `${track.model_id}:${track.local_id ?? track.id}`, isFallen);
+              const strokeColor = isPerson && !isFallen ? '#4ade80' : colors.stroke;
+              const fillColor = colors.fill;
 
               ctx.save();
               ctx.globalAlpha = alpha;
               ctx.strokeStyle = strokeColor;
-              ctx.lineWidth = hasCustomLabel ? 2.5 : 1.5;
+              ctx.lineWidth = hasCustomLabel ? 1.6 : 1.3;
+              ctx.lineJoin = 'round';
+              ctx.lineCap = 'round';
               ctx.shadowColor = strokeColor;
-              ctx.shadowBlur = hasCustomLabel ? 14 : 8;
+              ctx.shadowBlur = 0;
               if (drawMask && mask) {
-                ctx.beginPath();
-                mask.polygons.forEach(ring => {
-                  ctx.moveTo(mapVideoX(ring[0][0]), mapVideoY(ring[0][1]));
-                  ring.slice(1).forEach(point => ctx.lineTo(mapVideoX(point[0]), mapVideoY(point[1])));
-                  ctx.closePath();
-                });
+                oldestMaskAge = Math.max(oldestMaskAge ?? 0, now - track.maskFrame!.receivedAt);
+                let path = paths.get(mask);
+                if (!path) {
+                  path = segmentationPath(mask, videoDrawW, videoDrawH, videoOffsetX, videoOffsetY);
+                  paths.set(mask, path);
+                }
                 ctx.fillStyle = fillColor;
-                ctx.fill('evenodd');
-                ctx.stroke();
+                ctx.fill(path, 'evenodd');
+                ctx.lineWidth = 3.25;
+                ctx.strokeStyle = 'rgba(5, 12, 24, 0.5)';
+                ctx.stroke(path);
+                ctx.lineWidth = 1.4;
+                ctx.strokeStyle = strokeColor;
+                ctx.stroke(path);
               } else if (!isPerson && !registeredTarget) {
                 ctx.strokeRect(px, py, pw, ph);
               }
@@ -427,32 +421,73 @@ function CameraStreamCard({
               ctx.fillStyle = fillColor;
               if (!drawMask && !isPerson && !registeredTarget) ctx.fillRect(px, py, pw, ph);
 
-              // Label Tag Badge
-              ctx.font = `${isPerson ? '500 10px' : 'bold 12px'} "JetBrains Mono", "Space Grotesk", monospace`;
+              ctx.font = `${isPerson ? '500 10px' : '600 11px'} "Space Grotesk", sans-serif`;
               const textMetrics = ctx.measureText(displayLabel);
-              const tagPadding = isPerson ? 4 : 6;
-              const tagW = textMetrics.width + tagPadding * 2;
-              const tagH = isPerson ? 14 : 20;
-              const tagY = Math.max(0, py - tagH);
+              const tagPadding = 8;
+              const tagW = Math.min(width, textMetrics.width + tagPadding * 2 + 10);
+              const tagH = isPerson ? 19 : 24;
+              const tagX = Math.max(0, Math.min(px, width - tagW));
+              const tagY = Math.max(0, Math.min(height - tagH, py - tagH - 5));
 
-              ctx.fillStyle = hasCustomLabel ? 'rgba(6, 182, 212, 0.95)' : (isRobot ? 'rgba(244, 63, 94, 0.90)' : 'rgba(99, 102, 241, 0.90)');
+              ctx.fillStyle = 'rgba(9, 16, 30, 0.88)';
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = .8;
               ctx.beginPath();
-              ctx.roundRect(px, tagY, tagW, tagH, [4, 4, 0, 0]);
+              ctx.roundRect(tagX, tagY, tagW, tagH, 6);
+              ctx.fill();
+              ctx.stroke();
+              ctx.fillStyle = strokeColor;
+              ctx.beginPath();
+              ctx.arc(tagX + tagPadding, tagY + tagH / 2, 2.5, 0, Math.PI * 2);
               ctx.fill();
 
-              ctx.fillStyle = '#ffffff';
-              ctx.fillText(displayLabel, px + tagPadding, tagY + (isPerson ? 10 : 14));
+              ctx.fillStyle = '#f1f5f9';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(displayLabel, tagX + tagPadding + 9, tagY + tagH / 2, Math.max(1, tagW - tagPadding * 2 - 9));
               ctx.restore();
             });
           }
+          if (now - lastStatusAt >= 500) {
+            lastStatusAt = now;
+            setMaskAgeMs(oldestMaskAge === null ? null : Math.round(oldestMaskAge));
+          }
         }
       }
-      animId = requestAnimationFrame(render);
     };
 
-    animId = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animId);
-  }, [cam.id, metadataMap, roisMap]);
+    const onVideoFrame = () => {
+      if (disposed || !video) return;
+      lastVideoAt = performance.now();
+      render();
+      videoFrameId = video.requestVideoFrameCallback(onVideoFrame);
+    };
+    const onAnimationFrame = () => {
+      if (disposed) return;
+      render();
+      animId = requestAnimationFrame(onAnimationFrame);
+    };
+    const followsVideo = video && typeof video.requestVideoFrameCallback === 'function';
+    if (followsVideo) videoFrameId = video.requestVideoFrameCallback(onVideoFrame);
+    else animId = requestAnimationFrame(onAnimationFrame);
+    const watchdog = setInterval(() => {
+      if (document.hidden || (followsVideo && performance.now() - lastVideoAt > 350)) {
+        clear();
+        setMaskAgeMs(null);
+      }
+    }, 100);
+    document.addEventListener('visibilitychange', clear);
+    video?.addEventListener('emptied', clear);
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(animId);
+      if (videoFrameId) video?.cancelVideoFrameCallback(videoFrameId);
+      clearInterval(watchdog);
+      resize.disconnect();
+      document.removeEventListener('visibilitychange', clear);
+      video?.removeEventListener('emptied', clear);
+      clear();
+    };
+  }, [cam.id, metadataMap, isActive, isVisible]);
 
   return (
     <div
@@ -483,28 +518,6 @@ function CameraStreamCard({
           }}></span>
           <span style={{ fontWeight: 600, fontSize: '13px', letterSpacing: '0.01em' }}>{cam.name}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{
-            fontSize: '10px', background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-            padding: '2px 8px', borderRadius: '4px', fontWeight: 600,
-            border: '1px solid rgba(99,102,241,0.3)', fontFamily: 'monospace'
-          }}>
-            WHEP · WebRTC
-          </span>
-          <span style={{ fontSize: '10px', color: '#52525b', fontFamily: 'monospace' }}>&lt; 25ms</span>
-          <span style={{
-            fontSize: '10px',
-            background: metadataCount > 0 ? 'rgba(34,211,238,0.14)' : 'rgba(244,63,94,0.12)',
-            color: metadataCount > 0 ? '#22d3ee' : metadataConnected ? '#fb7185' : '#a1a1aa',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            fontWeight: 700,
-            border: `1px solid ${metadataCount > 0 ? 'rgba(34,211,238,0.32)' : 'rgba(244,63,94,0.28)'}`,
-            fontFamily: 'monospace'
-          }}>
-            {metadataCount > 0 ? `TRACKING ${metadataCount} ID` : metadataConnected ? 'NO METADATA' : 'WS OFFLINE'}
-          </span>
-        </div>
       </div>
 
       <div
@@ -514,19 +527,11 @@ function CameraStreamCard({
           position: 'relative',
           width: '100%',
           aspectRatio: '16/9',
-          background: '#09090b',
+          background: isDark ? '#09090b' : '#f97316',
           overflow: 'hidden',
           cursor: 'crosshair'
         }}
       >
-        {useIframeFallback ? (
-          <iframe
-            src={`http://${hostName}:8081/${cam.id}/?controls=0&autoplay=1&muted=1&playsinline=1`}
-            style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', top: 0, left: 0 }}
-            title={cam.name}
-            scrolling="no"
-          />
-        ) : (
           <video
             ref={videoRef}
             autoPlay
@@ -539,10 +544,9 @@ function CameraStreamCard({
               position: 'absolute',
               top: 0,
               left: 0,
-              background: '#09090b'
+              background: isDark ? '#09090b' : '#f97316'
             }}
           />
-        )}
 
         {/* Loading Spinner */}
         {!isPlaying && (
@@ -561,27 +565,29 @@ function CameraStreamCard({
         )}
 
         {/* Tracking status */}
-        <div style={{
-          position: 'absolute',
-          bottom: '8px',
-          left: '8px',
-          zIndex: 12,
-          background: 'rgba(15, 23, 42, 0.75)',
-          backdropFilter: 'blur(6px)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: '6px',
-          padding: '4px 8px',
-          fontSize: '11px',
-          color: '#cbd5e1',
-          pointerEvents: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
-        }}>
-          <span style={{ color: '#22d3ee', fontSize: '12px' }}>🎯</span>
-          <span>{metadataCount > 0 ? `Đang bám vết ${metadataCount} object` : 'Đang chờ metadata tracking từ backend'}</span>
-        </div>
+        {(metadataCount > 0 || !metadataConnected) && (
+          <div style={{
+            position: 'absolute',
+            bottom: '8px',
+            left: '8px',
+            zIndex: 12,
+            background: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: '6px',
+            padding: '4px 8px',
+            fontSize: '11px',
+            color: '#cbd5e1',
+            pointerEvents: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
+          }}>
+            <span style={{ color: '#22d3ee', fontSize: '12px' }}>🎯</span>
+            <span>{metadataCount > 0 ? `Đang bám vết ${metadataCount} đối tượng` : 'Đang nối lại metadata tracking'}</span>
+          </div>
+        )}
 
         <canvas
           ref={canvasRef}
@@ -594,12 +600,12 @@ function CameraStreamCard({
       </div>
     </div>
   );
-}
+});
 
 export default function MonitorView({ isActive = true }: { isActive?: boolean } = {}) {
 	  const { cameras } = useCameras();
 	  const [activeTab, setActiveTab] = useState('all');
-	  const [hostName] = useState(() => (typeof window !== 'undefined' ? (window.location.hostname || '192.168.5.104') : '192.168.5.104'));
+	  const [hostName] = useState(() => (typeof window !== 'undefined' ? (window.location.hostname || '192.168.0.84') : '192.168.0.84'));
 	  const [totalDetections, setTotalDetections] = useState(0);
 	  const [liveAlerts, setLiveAlerts] = useState<LiveAlert[]>([]);
 	  const [globalTrackList, setGlobalTrackList] = useState<{ id: number; fx: number; fy: number; cam: string; class?: string }[]>([]);
@@ -608,56 +614,12 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
   const [cameraRois, setCameraRois] = useState<Record<string, ROIState[]>>({});
   const [metadataConnected, setMetadataConnected] = useState(false);
   const [metadataCounts, setMetadataCounts] = useState<Record<string, number>>({});
+  const [labelCameraId, setLabelCameraId] = useState<string | null>(null);
+  const [learningCameraId, setLearningCameraId] = useState<string | null>(null);
   const [slotFilter, setSlotFilter] = useState<'ALL' | 'OCCUPIED' | 'EMPTY'>('ALL');
   const { t } = useLanguage();
 
-	  const [showFleetRegistryModal, setShowFleetRegistryModal] = useState(false);
-	  const [registeredTargets, setRegisteredTargets] = useState<RegisteredTargetItem[]>([]);
   const lastUiUpdateRef = useRef<number>(0);
-
-  const fetchRegisteredTargets = useCallback(() => {
-    fetch('/api/backend/registry/targets')
-      .then(res => res.ok ? res.json() : null)
-	      .then((data: RegistryTargetsResponse | null) => {
-	        if (data?.targets && Array.isArray(data.targets)) {
-	          const targets = data.targets;
-	          setRegisteredTargets(prev => {
-	            if (prev.length === targets.length) {
-	              const unchanged = prev.every((t, i) => {
-	                const n = targets[i];
-	                return n && t.label === n.label && t.class_name === n.class_name;
-	              });
-	              if (unchanged) return prev;
-	            }
-	            return targets;
-	          });
-	        }
-	      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    fetchRegisteredTargets();
-    const interval = setInterval(fetchRegisteredTargets, 4000);
-    return () => clearInterval(interval);
-  }, [fetchRegisteredTargets]);
-
-  const handleDeleteRegisteredTarget = async (label: string, camId?: string) => {
-    if (!confirm(`Bạn có chắc muốn xóa nhận diện '${label}' khỏi Registry?`)) return;
-    try {
-      const url = camId
-        ? `/api/backend/camera/${encodeURIComponent(camId)}/registry/target/${encodeURIComponent(label)}`
-        : `/api/backend/registry/target/${encodeURIComponent(label)}`;
-      const res = await fetch(url, {
-        method: 'DELETE',
-      });
-      if (res.ok) {
-        fetchRegisteredTargets();
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   // Storage Slot Occupancy Aggregate across all cameras (ONLY real configured ROIs)
   const allStorageSlots = React.useMemo(() => {
@@ -784,11 +746,13 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
               let count = 0;
               const now = Date.now();
               const source = data.source || 'deepstream';
+              if (source === 'identity_template' || source === 'identity_people') return true;
               const activeGlobals: { id: number; fx: number; fy: number; cam: string; class?: string }[] = [];
-              const countsByCam: Record<string, number> = {};
               let processedAnyStream = false;
 
-              data.streams.forEach((stream: { cam_id: string; objects: TrackedObject[]; rois?: ROIState[]; identity_rejected_labels?: string[] }, index: number) => {
+              data.streams.forEach((stream: { cam_id: string; model_id?: string; generation?: string; monitor_hidden?: boolean;
+                objects: TrackedObject[]; rois?: ROIState[]; identity_rejected_labels?: string[];
+                segmentation?: { revoked_track_ids?: number[]; labels?: { active_labels?: string[] } } }, index: number) => {
                 const camId = resolveStreamCamId(stream.cam_id, index, camerasRef.current);
                 if (Number.isFinite(data.timestamp)) {
                   if (data.timestamp < (latestPacketByCam.get(camId) ?? -Infinity)) return;
@@ -796,9 +760,9 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                 }
                 const identities = new Map<string, TrackedObject>();
                 (Array.isArray(stream.objects) ? stream.objects : []).forEach(obj => {
-                  if (!shouldShowTrackIdentity(obj.class, obj.label)
+                  if (!shouldShowTrackIdentity(obj.class, obj.model_id)
                     || /lost|removed|deleted/i.test(obj.tracking_state || '')) return;
-                  const key = hasRegisteredLabel(obj.label) ? `label:${obj.label!.trim().toLowerCase()}` : `person:${obj.id}`;
+                  const key = obj.model_id ? `model:${obj.model_id}:${obj.id}` : hasRegisteredLabel(obj.label) ? `label:${obj.label!.trim().toLowerCase()}` : `person:${obj.id}`;
                   const existing = identities.get(key);
                   const newer = (obj.observed_at ?? 0) > (existing?.observed_at ?? 0);
                   const sameTime = obj.observed_at === existing?.observed_at;
@@ -831,7 +795,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                   if (floorTrackMap.current.get(trackId)?.cam === camId) floorTrackMap.current.delete(trackId);
                 });
                 streamObjects.forEach(obj => {
-                  if (tracks.has(obj.id) || !hasRegisteredLabel(obj.label) || !isRobotClass(obj.class)) return;
+                  if (obj.model_id || tracks.has(obj.id) || !hasRegisteredLabel(obj.label) || !isRobotClass(obj.class)) return;
                   const previous = Array.from(tracks.entries()).find(([, track]) =>
                     track.label?.trim().toLowerCase() === obj.label!.trim().toLowerCase());
                   if (previous && now - previous[1].lastUpdated <= TRACK_HOLD_MS) {
@@ -841,25 +805,39 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                   }
                 });
                 const incomingIds = new Set(streamObjects.map(obj => obj.id));
+                const revokedIds = new Set(stream.segmentation?.revoked_track_ids || []);
+                const activeLabels = stream.segmentation?.labels?.active_labels;
+                const activeLabelNames = activeLabels ? new Set(activeLabels.map(label => label.trim().toLowerCase())) : null;
                 tracks.forEach((track, trackId) => {
                   const removed = stream.objects?.some(obj => obj.id === trackId
                     && /lost|removed|deleted/i.test(obj.tracking_state || ''));
-                  if (removed || (!incomingIds.has(trackId) && (!isRobotClass(track.class)
-                    || now - track.lastUpdated > TRACK_HOLD_MS))) tracks.delete(trackId);
+                  const invalidated = stream.monitor_hidden || revokedIds.has(trackId)
+                    || (track.model_id && stream.model_id && track.model_id !== stream.model_id)
+                    || (track.generation && stream.generation && track.generation !== stream.generation)
+                    || (track.labelPrompt && activeLabelNames && !activeLabelNames.has(track.label?.trim().toLowerCase() || ''));
+                  const replaced = track.model_id && track.label && streamObjects.some(obj => obj.id !== trackId
+                    && obj.model_id === track.model_id && obj.identity_verified
+                    && obj.label?.trim().toLowerCase() === track.label?.trim().toLowerCase());
+                  const expired = track.model_id ? !isLiveRegisteredMask(track.maskFrame, now)
+                    : !isRobotClass(track.class) || now - track.lastUpdated > TRACK_HOLD_MS;
+                  if (removed || invalidated || replaced || (!incomingIds.has(trackId) && expired)) {
+                    tracks.delete(trackId);
+                    if (floorTrackMap.current.get(trackId)?.cam === camId) floorTrackMap.current.delete(trackId);
+                  }
                 });
 
-                const visibleObjects = streamObjects.filter(obj => shouldShowTrackIdentity(obj.class, obj.label));
-                countsByCam[camId] = visibleObjects.length;
-
                 streamObjects.forEach(obj => {
+                  if (stream.monitor_hidden || revokedIds.has(obj.id)) return;
                   const previous = tracks.get(obj.id);
                   if (previous?.observedAt !== undefined && obj.observed_at !== undefined
                     && obj.observed_at < previous.observedAt) return;
                   const repeated = previous?.observedAt !== undefined && previous.observedAt === obj.observed_at;
                   const receivedAt = repeated ? previous!.lastUpdated
                     : metadataReceivedAt(now, obj.observed_at, data.timestamp, transportAgeMs);
-                  const maskFrame = updateLiveRegisteredMask(previous?.maskFrame, obj, now, data.timestamp, transportAgeMs);
-                  const showIdentity = shouldShowTrackIdentity(obj.class, obj.label);
+                  const maskFrame = obj.model_id
+                    ? updateLiveRegisteredMask(previous?.maskFrame, obj, now, data.timestamp, transportAgeMs)
+                    : null;
+                  const showIdentity = shouldShowTrackIdentity(obj.class, obj.model_id);
                   if (showIdentity) count++;
                   const fx = obj.floor_x ?? (obj.x + obj.w / 2);
                   const fy = obj.floor_y ?? (obj.y + obj.h);
@@ -885,7 +863,8 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
                   if (!tracks.has(obj.id)) {
                     tracks.set(obj.id, {
-                      id: obj.id, class: obj.class, label: obj.label,
+                      id: obj.id, local_id: obj.local_id, class: obj.class, label: obj.label, model_id: obj.model_id,
+                      generation: stream.generation, labelPrompt: Boolean(obj.label_prompt_id),
                       maskFrame, observedAt: obj.observed_at,
                       curX: obj.x, curY: obj.y, curW: obj.w, curH: obj.h,
                       targetX: obj.x, targetY: obj.y, targetW: obj.w, targetH: obj.h,
@@ -906,7 +885,11 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                   } else {
                     const track = tracks.get(obj.id)!;
                     track.class = obj.class;
+                    track.local_id = obj.local_id;
                     track.label = obj.label;
+                    track.model_id = obj.model_id;
+                    track.generation = stream.generation;
+                    track.labelPrompt = Boolean(obj.label_prompt_id);
                     track.maskFrame = maskFrame;
                     track.observedAt = obj.observed_at;
                     track.targetX = obj.x; track.targetY = obj.y;
@@ -933,7 +916,9 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
               if (now - lastUiUpdateRef.current >= 250) {
                 lastUiUpdateRef.current = now;
                 setTotalDetections(count);
-                setMetadataCounts(prev => ({ ...prev, ...countsByCam }));
+                setMetadataCounts(Object.fromEntries(Array.from(metadataMap.current, ([cameraId, tracks]) => [
+                  cameraId, Array.from(tracks.values()).filter(track => now - track.lastUpdated <= TRACK_HOLD_MS).length,
+                ])));
                 setGlobalTrackList(activeGlobals);
                 setCameraRois(Object.fromEntries(roisMap.current));
               }
@@ -970,6 +955,8 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
 	  return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bg, transition: 'background-color 0.2s ease' }}>
+      {isActive && labelCameraId && <MonitorLabelDialog cameraId={labelCameraId} onClose={() => setLabelCameraId(null)} />}
+      {isActive && learningCameraId && <ActiveLearningDialog cameraId={learningCameraId} onClose={() => setLearningCameraId(null)} />}
 
       {/* Top Monitor Navigation */}
       <div style={{
@@ -1014,39 +1001,6 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
           {/* Right Action & Status Badges */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button
-              onClick={() => setShowFleetRegistryModal(true)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '6px',
-                background: 'rgba(99,102,241,0.12)',
-                border: '1px solid rgba(99,102,241,0.3)',
-                padding: '6px 12px', borderRadius: '7px',
-                cursor: 'pointer', color: C.accentGlow,
-                fontSize: '12px', fontWeight: 600,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                transition: 'all 0.2s'
-              }}
-            >
-              <Bot size={14} />
-              <span>Robot Registry ({registeredTargets.length})</span>
-            </button>
-
-            {/* MTMC Status Badge */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              background: 'rgba(34,211,238,0.08)',
-              border: '1px solid rgba(34,211,238,0.25)',
-              padding: '5px 12px', borderRadius: '20px'
-            }}>
-              <span style={{
-                width: '6px', height: '6px', borderRadius: '50%',
-                background: C.cyan, animation: 'pulse 2s infinite',
-                boxShadow: `0 0 8px ${C.cyan}`
-              }}></span>
-              <span style={{ fontSize: '12px', fontWeight: 600, color: C.cyan, fontFamily: 'monospace' }}>
-                MTMC FUSION ACTIVE
-              </span>
-            </div>
           </div>
         </div>
       </div>
@@ -1083,485 +1037,34 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     cam={cam}
                     hostName={hostName}
                     isVisible={activeTab === 'all' || activeTab === cam.id}
+                    isActive={isActive}
                     activeTab={activeTab}
                     metadataMap={metadataMap}
                     roisMap={roisMap}
                     metadataCount={metadataCounts[cam.id] || 0}
                     metadataConnected={metadataConnected}
+                    onLabel={setLabelCameraId}
+                    onLearn={setLearningCameraId}
                   />
                 ))}
               </div>
             </div>
 
 
-            {/* Right: Side Panel */}
-            <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', gap: '16px', minWidth: '320px' }}>
-
-              {/* SINGLE CAMERA: ROI Bay Status */}
-              {activeTab !== 'all' ? (
-                <div style={{
-                  background: C.surface,
-                  borderRadius: '12px', padding: '20px',
-                  border: `1px solid ${C.border}`,
-                  display: 'flex', flexDirection: 'column', gap: '16px'
-                }}>
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    borderBottom: `1px solid ${C.border}`, paddingBottom: '12px'
-                  }}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: C.textPrimary }}>
-                        Trạng Thái Ô Chứa Hàng
-                      </h3>
-                      <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: C.textMuted }}>
-                        Camera: <b style={{ color: C.accentGlow }}>{cameras.find(c => c.id === activeTab)?.name || activeTab}</b>
-                      </p>
-                    </div>
-                    <span style={{
-                      fontSize: '10px', background: 'rgba(99,102,241,0.12)',
-                      color: C.accentGlow, padding: '3px 8px', borderRadius: '5px',
-                      fontWeight: 600, fontFamily: 'monospace',
-                      border: '1px solid rgba(99,102,241,0.25)'
-                    }}>
-                      REAL-TIME
-                    </span>
-                  </div>
-
-	                  {activeStorageRois.length === 0 ? (
-                    <div style={{
-                      padding: '32px 20px', textAlign: 'center',
-                      color: C.textMuted, fontSize: '13px',
-                      background: C.card, borderRadius: '10px',
-                      border: `1px dashed ${C.border}`
-                    }}>
-                      <p style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: 600, color: C.textSecondary }}>Chưa có vùng ROI nào</p>
-                      Chuyển sang tab <b style={{ color: C.accentGlow }}>Building</b> &rarr; <b>Cấu hình Phân tích Hành vi</b> để vẽ vùng ô chứa hàng.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-	                      {activeStorageRois.map(r => {
-                        const isCarFull = (r.status as string) === 'CARFULL' || r.status === 'OCCUPIED';
-                        return (
-                          <div
-                            key={r.roi_id}
-                            style={{
-                              padding: '16px',
-                              borderRadius: '10px',
-                              background: isCarFull
-                                ? 'rgba(244, 63, 94, 0.08)'
-                                : 'rgba(34, 211, 238, 0.06)',
-                              border: `1px solid ${isCarFull ? 'rgba(244,63,94,0.35)' : 'rgba(34,211,238,0.25)'}`,
-                              boxShadow: isCarFull
-                                ? '0 0 20px rgba(244,63,94,0.12)'
-                                : '0 0 20px rgba(34,211,238,0.08)',
-                              display: 'flex', flexDirection: 'column', gap: '10px',
-                              transition: 'all 0.3s ease'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontWeight: 700, fontSize: '13px', color: C.textPrimary, fontFamily: 'monospace', letterSpacing: '0.05em' }}>
-                                VỊ TRÍ · {r.name}
-                              </span>
-                            </div>
-
-                            {/* Status Badge */}
-                            <div style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              padding: '10px 16px', borderRadius: '8px',
-                              background: isCarFull ? 'rgba(244,63,94,0.18)' : 'rgba(34,211,238,0.12)',
-                              color: isCarFull ? '#fb7185' : '#67e8f9',
-                              fontWeight: 700, fontSize: '14px',
-                              letterSpacing: '0.08em', fontFamily: 'monospace',
-                              border: `1px solid ${isCarFull ? 'rgba(244,63,94,0.4)' : 'rgba(34,211,238,0.3)'}`,
-                              textShadow: isCarFull ? '0 0 12px rgba(244,63,94,0.5)' : '0 0 12px rgba(34,211,238,0.5)'
-                            }}>
-                              {isCarFull ? '⚠ CÓ HÀNG — CARFULL' : '◎ TRỐNG — EMPTY'}
-                            </div>
-
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: C.textMuted }}>
-                              <span>{isCarFull ? 'Chiếm dụng bởi:' : 'Tình trạng:'}</span>
-                              <span style={{ fontWeight: 600, color: isCarFull ? '#fb7185' : '#67e8f9', fontFamily: 'monospace' }}>
-	                                {isCarFull
-	                                  ? (r.occupant_labels && r.occupant_labels.length > 0 ? r.occupant_labels.join(', ') : (r.occupant_ids && r.occupant_ids.length > 0 ? r.occupant_ids.map(id => `#${id}`).join(', ') : 'Có vật thể / xe'))
-	                                  : 'Sẵn sàng tiếp nhận'}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  {/* ── Trạng thái Các Ô Chứa Hàng (Storage Slot Occupancy Overview) ── */}
-                  <div style={{
-                    background: C.surface, borderRadius: '12px', padding: '14px',
-                    border: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: '12px'
-                  }}>
-                    {/* Header */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: C.textPrimary, fontSize: '13px' }}>
-                        <Boxes size={17} color={C.cyan} />
-                        Trạng Thái Ô Chứa Hàng
-                      </div>
-                      <span style={{
-                        fontSize: '10px', background: 'rgba(6,182,212,0.12)', color: C.cyan,
-                        padding: '3px 8px', borderRadius: '5px', fontWeight: 700, fontFamily: 'monospace',
-                        border: '1px solid rgba(6,182,212,0.25)'
-                      }}>
-	                        CARFULL · FMS/CAMERA
-                      </span>
-                    </div>
-
-                    {allStorageSlots.length === 0 ? (
-                      <div style={{
-                        padding: '28px 16px', textAlign: 'center',
-                        color: C.textMuted, fontSize: '12px',
-                        background: C.card, borderRadius: '10px',
-                        border: `1px dashed ${C.border}`,
-                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px'
-                      }}>
-                        <Boxes size={28} color={C.textMuted} style={{ opacity: 0.6 }} />
-                        <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: C.textSecondary }}>
-                          Chưa có ô chứa hàng nào được thiết lập
-                        </p>
-                        <p style={{ margin: 0, fontSize: '11px', color: C.textMuted, lineHeight: 1.5 }}>
-                          Chuyển sang tab <b style={{ color: C.accentGlow }}>Building</b> &rarr; <b>Cấu hình Phân tích & ROI</b> để vẽ các vùng ô chứa hàng thực tế.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        {/* KPI Metric Summary Bar */}
-                        <div style={{
-                          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px',
-                          background: C.card, padding: '10px', borderRadius: '8px', border: `1px solid ${C.border}`
-                        }}>
-                          <div>
-                            <div style={{ fontSize: '11px', color: C.textMuted }}>Tổng số ô</div>
-                            <div style={{ fontSize: '16px', fontWeight: 700, color: C.textPrimary, fontFamily: 'monospace' }}>{allStorageSlots.length}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '11px', color: '#fb7185' }}>Có hàng</div>
-                            <div style={{ fontSize: '16px', fontWeight: 700, color: '#fb7185', fontFamily: 'monospace' }}>{occupiedSlotsCount}</div>
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '11px', color: '#34d399' }}>Ô trống</div>
-                            <div style={{ fontSize: '16px', fontWeight: 700, color: '#34d399', fontFamily: 'monospace' }}>{emptySlotsCount}</div>
-                          </div>
-                        </div>
-
-                        {/* Occupancy Progress Bar */}
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px', color: C.textMuted }}>
-                            <span>Tỷ lệ chiếm dụng</span>
-                            <span style={{ fontWeight: 600, color: C.textPrimary, fontFamily: 'monospace' }}>{occupancyPercent}% ({occupiedSlotsCount}/{allStorageSlots.length})</span>
-                          </div>
-                          <div style={{ width: '100%', height: '6px', background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{
-                              width: `${occupancyPercent}%`,
-                              height: '100%',
-                              background: occupancyPercent > 70 ? 'linear-gradient(90deg, #fb7185, #e11d48)' : 'linear-gradient(90deg, #06b6d4, #10b981)',
-                              borderRadius: '3px',
-                              transition: 'width 0.4s ease'
-                            }} />
-                          </div>
-                        </div>
-
-                        {/* Filter Segmented Controls */}
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          {(['ALL', 'OCCUPIED', 'EMPTY'] as const).map(f => {
-                            const isActive = slotFilter === f;
-                            const label = f === 'ALL' ? `Tất cả (${allStorageSlots.length})` : f === 'OCCUPIED' ? `Có hàng (${occupiedSlotsCount})` : `Trống (${emptySlotsCount})`;
-                            return (
-                              <button
-                                key={f}
-                                onClick={() => setSlotFilter(f)}
-                                style={{
-                                  flex: 1, padding: '5px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 600,
-                                  cursor: 'pointer', border: '1px solid transparent',
-                                  background: isActive ? (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(15,23,42,0.10)') : 'transparent',
-                                  color: isActive ? C.textPrimary : C.textMuted,
-                                  borderColor: isActive ? C.border : 'transparent',
-                                  transition: 'all 0.15s ease'
-                                }}
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {/* Slot Cards List */}
-                        <div style={{
-                          display: 'flex', flexDirection: 'column', gap: '8px',
-                          maxHeight: '260px', overflowY: 'auto', paddingRight: '2px'
-                        }}>
-                          {filteredSlots.length === 0 ? (
-                            <div style={{ padding: '20px', textAlign: 'center', color: C.textMuted, fontSize: '12px' }}>
-                              Không có ô chứa hàng nào phù hợp bộ lọc
-                            </div>
-                          ) : (
-                            filteredSlots.map(slot => {
-                              const isOccupied = slot.status === 'CARFULL';
-                              return (
-                                <div
-                                  key={slot.id}
-                                  style={{
-                                    padding: '10px 12px',
-                                    borderRadius: '8px',
-                                    background: isOccupied
-                                      ? (isDark ? 'rgba(244, 63, 94, 0.08)' : 'rgba(244, 63, 94, 0.05)')
-                                      : (isDark ? 'rgba(16, 185, 129, 0.06)' : 'rgba(16, 185, 129, 0.04)'),
-                                    border: `1px solid ${isOccupied ? 'rgba(244,63,94,0.3)' : 'rgba(16,185,129,0.25)'}`,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                >
-                                  {/* Left: Icon & Slot Name */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-                                    <div style={{
-                                      width: '30px', height: '30px', borderRadius: '6px',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      background: isOccupied ? 'rgba(244,63,94,0.18)' : 'rgba(16,185,129,0.15)',
-                                      color: isOccupied ? '#fb7185' : '#34d399',
-                                    }}>
-                                      <Package size={16} />
-                                    </div>
-                                    <div>
-                                      <div style={{ fontSize: '12px', fontWeight: 700, color: C.textPrimary }}>
-                                        {slot.name}
-                                      </div>
-                                      <div style={{ fontSize: '10px', color: C.textMuted, fontFamily: 'monospace' }}>
-                                        {slot.camName}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Right: Status Pill */}
-                                  <div style={{ textAlign: 'right' }}>
-                                    <span style={{
-                                      fontSize: '11px',
-                                      fontWeight: 700,
-                                      padding: '3px 8px',
-                                      borderRadius: '5px',
-                                      background: isOccupied ? 'rgba(244,63,94,0.2)' : 'rgba(16,185,129,0.15)',
-                                      color: isOccupied ? '#fb7185' : '#34d399',
-                                      border: `1px solid ${isOccupied ? 'rgba(244,63,94,0.4)' : 'rgba(16,185,129,0.3)'}`,
-                                      fontFamily: 'monospace',
-                                      letterSpacing: '0.04em'
-                                    }}>
-                                      {isOccupied ? '⚠ CÓ HÀNG' : '◎ TRỐNG'}
-                                    </span>
-                                    {isOccupied && slot.occupants.length > 0 && (
-                                      <div style={{ fontSize: '10px', color: C.textMuted, marginTop: '3px', fontFamily: 'monospace' }}>
-                                        {slot.occupants.join(', ')}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Live Alerts Feed */}
-                  <div style={{
-                    background: C.surface, borderRadius: '12px', padding: '14px',
-                    border: `1px solid ${C.border}`,
-                    flex: 1, display: 'flex', flexDirection: 'column'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontWeight: 600, color: C.textPrimary, fontSize: '13px' }}>
-                        <ShieldAlert size={16} color={C.rose} /> Live Behavior Alarms
-                      </div>
-                      <span style={{ fontSize: '10px', color: C.textMuted, fontFamily: 'monospace' }}>PostgreSQL Sync</span>
-                    </div>
-
-                    <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '260px' }}>
-                      {liveAlerts.length === 0 ? (
-                        <div style={{ padding: '24px', textAlign: 'center', color: C.textMuted, fontSize: '12px' }}>
-                          Chưa phát hiện sự kiện bất thường
-                        </div>
-                      ) : (
-                        liveAlerts.map((ev, i) => {
-                          const isIntrusion = ev.rule_type === 'intrusion';
-                          const isTripwire = ev.rule_type === 'tripwire';
-                          const accentColor = isIntrusion ? C.rose : isTripwire ? C.cyan : C.orange;
-                          return (
-                            <div
-                              key={i}
-                              style={{
-                                padding: '9px 12px 9px 14px',
-                                borderRadius: '7px',
-                                background: C.card,
-                                border: `1px solid ${C.border}`,
-                                borderLeft: `3px solid ${accentColor}`,
-                                fontSize: '12px'
-                              }}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600, marginBottom: '3px' }}>
-                                <span style={{ textTransform: 'uppercase', fontSize: '10px', color: accentColor, fontFamily: 'monospace', letterSpacing: '0.08em' }}>
-                                  {ev.rule_type}
-                                </span>
-                                <span style={{ color: C.textMuted, fontSize: '10px', fontFamily: 'monospace' }}>
-                                  {new Date(ev.timestamp).toLocaleTimeString()}
-                                </span>
-                              </div>
-                              <p style={{ margin: 0, color: C.textSecondary, lineHeight: 1.4 }}>{ev.description}</p>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-
+            {/* Right: Side Panel (AI Chatbot & Real-Time Environment Hub) */}
+            <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', minWidth: '340px' }}>
+              <MonitorChatAssistant
+                cameras={cameras}
+                liveAlerts={liveAlerts}
+                storageSlots={allStorageSlots}
+                hostName={hostName}
+                onSelectCameraTab={setActiveTab}
+              />
             </div>
           </>
         )}
       </div>
 
-      {/* ── MODAL 2: REGISTERED FLEET MANAGER DRAWER ── */}
-      {showFleetRegistryModal && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(8px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: '20px'
-        }}>
-          <div style={{
-            width: '100%', maxWidth: '640px',
-            background: '#18181f',
-            border: '1px solid #3b3b4f',
-            borderRadius: '16px',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.8), 0 0 30px rgba(99,102,241,0.2)',
-            overflow: 'hidden', maxHeight: '80vh', display: 'flex', flexDirection: 'column'
-          }}>
-            {/* Header */}
-            <div style={{
-              padding: '16px 20px',
-              background: 'linear-gradient(90deg, rgba(99,102,241,0.15), rgba(34,211,238,0.1))',
-              borderBottom: '1px solid #2e2e3f',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{
-                  width: '34px', height: '34px', borderRadius: '8px',
-                  background: 'rgba(99,102,241,0.25)', border: '1px solid #6366f1',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8'
-                }}>
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f4f4f5' }}>
-                    Danh Sách Robot & Kệ Hàng Đã Đăng Ký
-                  </h3>
-                  <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8' }}>
-                    Tổng số: {registeredTargets.length} mục tiêu đang theo dõi Re-ID
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowFleetRegistryModal(false)}
-                style={{
-                  background: 'transparent', border: 'none', color: '#71717a',
-                  cursor: 'pointer', padding: '6px', borderRadius: '6px',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center'
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Targets Table */}
-            <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {registeredTargets.length === 0 ? (
-                <div style={{ padding: '32px 20px', textAlign: 'center', color: '#71717a', fontSize: '13px' }}>
-                  <Bot size={32} color="#52525b" style={{ margin: '0 auto 10px auto' }} />
-                  <p style={{ margin: 0, fontWeight: 600, color: '#a1a1aa' }}>Chưa có robot/kệ hàng nào được đăng ký</p>
-                  <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: '#71717a' }}>
-                    Vào Building &gt; Label để crop frame camera và gán nhãn tracking.
-                  </p>
-                </div>
-              ) : (
-                registeredTargets.map((tgt) => (
-                  <div
-                    key={tgt.label}
-                    style={{
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid #2e2e3f',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{
-                        width: '32px', height: '32px', borderRadius: '6px',
-                        background: tgt.label.startsWith('Rack_') ? 'rgba(99,102,241,0.18)' : 'rgba(244,63,94,0.18)',
-                        color: tgt.label.startsWith('Rack_') ? '#a5b4fc' : '#fb7185',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }}>
-                        {tgt.label.startsWith('Rack_') ? <Package size={16} /> : <Bot size={16} />}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#f4f4f5', fontFamily: 'monospace' }}>
-                          {tgt.label}
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#71717a', marginTop: '2px' }}>
-                          Camera: <b style={{ color: '#22d3ee' }}>{tgt.last_cam || 'N/A'}</b> · Mẫu: {tgt.samples_count || 1}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{
-                        fontSize: '10px',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        background: 'rgba(52,211,153,0.15)',
-                        color: '#34d399',
-                        fontWeight: 600,
-                        border: '1px solid rgba(52,211,153,0.3)',
-                        fontFamily: 'monospace'
-                      }}>
-                        ACTIVE 512D
-                      </span>
-                      <button
-                        onClick={() => handleDeleteRegisteredTarget(tgt.label, tgt.cam_id || tgt.last_cam)}
-                        style={{
-                          background: 'rgba(244,63,94,0.12)',
-                          border: '1px solid rgba(244,63,94,0.3)',
-                          color: '#fb7185',
-                          cursor: 'pointer',
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                          fontSize: '11px',
-                          fontWeight: 600
-                        }}
-                      >
-                        <Trash2 size={13} />
-                        <span>Xóa</span>
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,0 +1,20 @@
+.journal { display: flex; flex-direction: column; gap: 12px; color: var(--text-primary); padding: 12px 0 20px; border-bottom: 1px solid var(--border); margin-bottom: 18px; font-size: 12px; }
+.heading, .toolbar, .actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.heading, .toolbar { justify-content: space-between; }
+.heading strong { display: flex; align-items: center; gap: 8px; color: #2dbda7; font-size: 12px; }
+.journal button, .journal a, .journal select { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 9px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-size: 11px; text-decoration: none; cursor: pointer; }
+.journal button:disabled { opacity: .4; cursor: not-allowed; }
+.journal button:hover:not(:disabled), .journal a:hover { border-color: #2dbda7; }
+.journal button:focus-visible, .journal a:focus-visible, .journal select:focus-visible { outline: 2px solid #2dbda7; outline-offset: 2px; }
+.note { margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.toolbar span { color: var(--text-muted); font-size: 10px; }
+.list { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow: auto; }
+.record { padding: 12px; border: 1px solid var(--border); border-left: 3px solid #2dbda7; border-radius: 9px; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card); }
+.filename { font: 10px monospace; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recording, .badge { color: #27bb9e; background: #27bb9e18; border: 1px solid #27bb9e55; border-radius: 5px; padding: 3px 7px; font-size: 10px; }
+.recording { color: #e9b251; border-color: #e9b25155; background: #e9b25115; }
+.warning { color: #e6ab55; background: #e6ab5510; padding: 10px; border-radius: 6px; margin: 0; font-size: 11px; line-height: 1.6; }
+.empty { padding: 18px; color: var(--text-muted); text-align: center; }
+.modal { position: fixed; inset: 0; z-index: 2200; background: #000c; display: grid; place-items: center; padding: 20px; }
+.player { width: min(100%, 1000px); background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.player video { width: 100%; max-height: 65vh; background: #000; }
