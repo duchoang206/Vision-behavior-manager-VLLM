@@ -1,15 +1,20 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useCameras } from '../CameraContext';
 import { useTab } from '../TabContext';
 import { useAppTheme } from '../ThemeContext';
-import { RegisteredMask, validRegisteredMask, maskPath } from '../../lib/registered-mask';
+import ModelManager from './ModelManager';
+import ModelLabelManager from './ModelLabelManager';
+import CameraSources from './CameraSources';
 import {
   Eye, EyeOff, ShieldAlert, Plus, Trash2,
   Camera as CameraIcon, RefreshCw, MapPin, Pencil,
-  Tag, Crop, Bot, Package
+  Package, Tag
 } from 'lucide-react';
+
+const ActiveLearningView = dynamic(() => import('./ActiveLearningView'), { ssr: false });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Rule = {
@@ -18,7 +23,6 @@ type Rule = {
   camera_points?: number[][]; fms_points?: number[][]; coordinate_space?: string;
 };
 
-type CropRect = { x: number; y: number; w: number; h: number };
 type DrawSpace = 'camera' | 'fms';
 type FmsLayout = {
   id?: string;
@@ -33,19 +37,6 @@ type FmsLayout = {
     depth?: number;
   };
 };
-type TargetRegistryItem = {
-  label: string;
-  key?: string;
-  cam_id?: string;
-  category?: string;
-  fms_robot_id?: number;
-  last_cam?: string;
-  samples_count?: number;
-  bbox?: number[] | null;
-  has_crop_image?: boolean;
-  mask_samples_count?: number;
-};
-type IdentityLearning = { state?: string; revision?: number; samples?: number; training?: boolean; last_error?: string; labels?: Record<string, number> };
 type EmptyStateColors = {
   borderHard: string;
   textMuted: string;
@@ -134,9 +125,8 @@ const GradientBtn = ({
 export default function BuildingView() {
   const { cameras, fetchCameras, deleteCamera: handleDeleteCameraCtx, updateCamera: handleUpdateCameraCtx } = useCameras();
   const { colors: C, isDark } = useAppTheme();
-  const [activeTab, setActiveTab] = useState<'camera' | 'rules' | 'label'>('camera');
+  const [activeTab, setActiveTab] = useState<'camera' | 'rules' | 'models' | 'label' | 'learning'>('camera');
   const [snapshotTimestamp, setSnapshotTimestamp] = useState<number>(() => Date.now());
-  const labelImageRef = useRef<HTMLImageElement | null>(null);
   const [newCamName, setNewCamName] = useState('');
   const [newCamUrl, setNewCamUrl] = useState('');
   const [editCamModal, setEditCamModal] = useState({ open: false, id: '', name: '', url: '' });
@@ -158,32 +148,7 @@ export default function BuildingView() {
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const [currentTargetClasses, setCurrentTargetClasses] = useState<string[]>(['robot', 'rack']);
   const [fmsLayout, setFmsLayout] = useState<FmsLayout | null>(null);
-  const [labelCamId, setLabelCamId] = useState('');
-  const [labelName, setLabelName] = useState('Robot_9001');
-  const [labelCategory, setLabelCategory] = useState<'robot' | 'rack' | 'person'>('robot');
-  const [labelCrop, setLabelCrop] = useState<CropRect | null>(null);
-  const [labelMask, setLabelMask] = useState<RegisteredMask | null>(null);
-  const [maskPoints, setMaskPoints] = useState<{ point: number[]; label: number }[]>([]);
-  const [maskTool, setMaskTool] = useState<'box' | 'add' | 'remove'>('box');
-  const [maskBusy, setMaskBusy] = useState(false);
-  const [maskAvailable, setMaskAvailable] = useState(false);
-  const [labelFrameReady, setLabelFrameReady] = useState(false);
-  const maskRequest = useRef(0);
-  const [cropStart, setCropStart] = useState<{ x: number; y: number } | null>(null);
-  const [isSavingLabel, setIsSavingLabel] = useState(false);
-  const [labelStatus, setLabelStatus] = useState('');
-  const [registeredTargets, setRegisteredTargets] = useState<TargetRegistryItem[]>([]);
-  const [identityLearning, setIdentityLearning] = useState<IdentityLearning | null>(null);
   const { activeTab: workspaceTab } = useTab();
-
-  useEffect(() => {
-    if (activeTab !== 'label') return;
-    let cancelled = false;
-    fetch('/api/backend/registry/mask/status').then(response => response.json()).then(data => {
-      if (!cancelled) setMaskAvailable(Boolean(data.available));
-    }).catch(() => { if (!cancelled) setMaskAvailable(false); });
-    return () => { cancelled = true; maskRequest.current += 1; };
-  }, [activeTab]);
 
   // ─── Shared element styles derived from dynamic theme ───────────────────────
   const inputStyle: React.CSSProperties = {
@@ -219,35 +184,6 @@ export default function BuildingView() {
     },
   };
 
-  const fetchRegisteredTargets = useCallback((camId?: string) => {
-    const url = camId ? `/api/backend/registry/targets?cam_id=${encodeURIComponent(camId)}` : '/api/backend/registry/targets';
-    fetch(url)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (Array.isArray(d?.targets)) setRegisteredTargets(d.targets); if (d?.identity) setIdentityLearning(d.identity); })
-      .catch(() => {});
-  }, []);
-
-  const resetLabelMaskState = (newFrame = true) => {
-    maskRequest.current += 1;
-    setLabelMask(null);
-    setMaskPoints([]);
-    setMaskTool('box');
-    setMaskBusy(false);
-    if (newFrame) setLabelFrameReady(false);
-    setCropStart(null);
-    setLabelCrop(null);
-  };
-
-  useEffect(() => {
-    if (activeTab === 'label') fetchRegisteredTargets(labelCamId);
-  }, [activeTab, labelCamId, fetchRegisteredTargets]);
-
-  useEffect(() => {
-    if (workspaceTab !== 'building' || activeTab !== 'label') return;
-    const interval = setInterval(() => fetchRegisteredTargets(labelCamId), 3000);
-    return () => clearInterval(interval);
-  }, [workspaceTab, activeTab, labelCamId, fetchRegisteredTargets]);
-
   useEffect(() => {
     fetch('/api/backend/model/classes').then(r => r.json())
       .then(d => { if (d.classes?.length > 0) setAvailableClasses(d.classes); }).catch(() => {});
@@ -277,7 +213,6 @@ export default function BuildingView() {
     if (!firstCameraId) return;
     queueMicrotask(() => {
       setSelectedCamId(prev => prev || firstCameraId);
-      setLabelCamId(prev => prev || firstCameraId);
     });
   }, [cameras]);
   useEffect(() => {
@@ -415,134 +350,6 @@ export default function BuildingView() {
     };
   };
 
-  const updateLabelCrop = (start: { x: number; y: number }, end: { x: number; y: number }) => {
-    const x = Math.min(start.x, end.x);
-    const y = Math.min(start.y, end.y);
-    const w = Math.abs(end.x - start.x);
-    const h = Math.abs(end.y - start.y);
-    setLabelCrop(w > 0.005 && h > 0.005 ? { x, y, w, h } : null);
-  };
-
-  const getLabelFrame = () => {
-    const image = labelImageRef.current;
-    if (!labelFrameReady || !image || !image.complete || !image.naturalWidth) throw new Error('Ảnh chưa tải xong.');
-    const frameCanvas = document.createElement('canvas');
-    frameCanvas.width = image.naturalWidth;
-    frameCanvas.height = image.naturalHeight;
-    const context = frameCanvas.getContext('2d');
-    if (!context) throw new Error('Không đọc được ảnh camera.');
-    context.drawImage(image, 0, 0);
-    return frameCanvas.toDataURL('image/jpeg', 0.95);
-  };
-
-  const generateLabelMask = async (corrections = maskPoints) => {
-    if (!labelCrop || labelCategory === 'person' || !labelName.trim()) return;
-    const requestId = ++maskRequest.current;
-    setMaskBusy(true);
-    setLabelMask(null);
-    try {
-      const response = await fetch('/api/backend/registry/mask/preview', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cam_id: labelCamId, label: labelName.trim(), category: labelCategory,
-          frame_image: getLabelFrame(), bbox: [labelCrop.x, labelCrop.y, labelCrop.w, labelCrop.h],
-          points: corrections.map(item => item.point), point_labels: corrections.map(item => item.label) }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Không tạo được mask.');
-      if (!validRegisteredMask(data.mask)) throw new Error('Mask trả về không hợp lệ.');
-      if (requestId !== maskRequest.current) return;
-      setLabelMask(data.mask);
-      setLabelStatus('Kiểm tra mask. Dùng + Vật / − Nền để chỉnh, sau đó lưu góc nhìn.');
-    } catch (error) {
-      if (requestId === maskRequest.current) setLabelStatus(`Lỗi mask: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      if (requestId === maskRequest.current) setMaskBusy(false);
-    }
-  };
-
-  const handleSaveLabelCrop = async () => {
-    const img = labelImageRef.current;
-    if (!img || !labelCrop || !labelName.trim() || !labelCamId || !labelFrameReady || maskBusy) return;
-    if (labelCategory !== 'person' && !validRegisteredMask(labelMask)) {
-      setLabelStatus('Lỗi: hãy tạo và kiểm tra mask trước khi lưu nhãn robot/kệ.');
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(labelCrop.w * img.naturalWidth));
-    canvas.height = Math.max(1, Math.round(labelCrop.h * img.naturalHeight));
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.drawImage(
-      img,
-      labelCrop.x * img.naturalWidth,
-      labelCrop.y * img.naturalHeight,
-      labelCrop.w * img.naturalWidth,
-      labelCrop.h * img.naturalHeight,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-
-    setIsSavingLabel(true);
-    setLabelStatus('');
-    try {
-      const res = await fetch('/api/backend/registry/register-crop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cam_id: labelCamId,
-          label: labelName.trim(),
-          category: labelCategory,
-          crop_image: canvas.toDataURL('image/jpeg', 0.9),
-          bbox: [labelCrop.x, labelCrop.y, labelCrop.w, labelCrop.h],
-          ...(labelCategory !== 'person' && labelMask ? { mask: labelMask, frame_image: getLabelFrame() } : {}),
-        }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.detail || `HTTP ${res.status}`);
-      }
-
-      const payload = await res.json().catch(() => null);
-      setLabelStatus(payload?.message || `Đã gán nhãn ${labelName.trim()} và đưa vào registry tracking.`);
-      setLabelCrop(null);
-      setLabelMask(null);
-      setMaskPoints([]);
-      fetchRegisteredTargets(labelCamId);
-    } catch (e: unknown) {
-      setLabelStatus(`Lỗi gán nhãn: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setIsSavingLabel(false);
-    }
-  };
-
-  const handleDeleteRegisteredTarget = async (label: string, camId?: string) => {
-    const targetCamId = camId || labelCamId;
-    const camName = cameras.find(c => c.id === targetCamId)?.name || 'Camera này';
-    if (!confirm(`Xóa nhãn '${label}' trên ${camName}? (Thao tác này chỉ xóa trên ${camName}, không ảnh hưởng đến camera khác)`)) return;
-    try {
-      const res = await fetch(`/api/backend/camera/${encodeURIComponent(targetCamId)}/registry/target/${encodeURIComponent(label)}`, { method: 'DELETE' });
-      if (res.ok) fetchRegisteredTargets(targetCamId);
-    } catch {}
-  };
-
-  const handleUseRegisteredTarget = (target: TargetRegistryItem) => {
-    setLabelName(target.label);
-    if (target.category === 'robot' || target.category === 'rack' || target.category === 'person') {
-      setLabelCategory(target.category);
-    }
-    if (target.last_cam && cameras.some(c => c.id === target.last_cam)) {
-      setLabelCamId(target.last_cam);
-    }
-    resetLabelMaskState();
-    setLabelStatus('Giữ nguyên tên nhãn này, lấy frame mới và khoanh đúng vật ở góc nhìn khác để bổ sung mẫu.');
-    setSnapshotTimestamp(prev => prev + 1);
-  };
-
   // Tab style helper
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '10px 20px', borderRadius: '9px', cursor: 'pointer',
@@ -587,7 +394,7 @@ export default function BuildingView() {
 
         {/* Top Tabs */}
         <div style={{
-          display: 'flex', gap: '8px',
+          display: 'flex', gap: '8px', flexWrap: 'wrap',
           borderBottom: `1px solid ${C.border}`,
           paddingBottom: '18px', marginBottom: '24px',
         }}>
@@ -597,102 +404,18 @@ export default function BuildingView() {
           <button onClick={() => setActiveTab('rules')} style={tabStyle(activeTab === 'rules')}>
             <ShieldAlert size={14} /> Phân tích Hành vi (ROI / Tripwire)
           </button>
-          <button onClick={() => setActiveTab('label')} style={tabStyle(activeTab === 'label')}>
-            <Tag size={14} /> Label
-          </button>
+          <button onClick={() => setActiveTab('models')} style={tabStyle(activeTab === 'models')}><Package size={14} /> Model / TensorRT</button>
+          <button onClick={() => setActiveTab('label')} style={tabStyle(activeTab === 'label')}><Tag size={14} /> Label</button>
+          <button onClick={() => setActiveTab('learning')} style={tabStyle(activeTab === 'learning')}><RefreshCw size={14} /> Active Learning</button>
         </div>
+        <div hidden={activeTab !== 'models'}><ModelManager active={workspaceTab === 'building' && activeTab === 'models'} /></div>
+        <div hidden={activeTab !== 'label'}><ModelLabelManager active={workspaceTab === 'building' && activeTab === 'label'} /></div>
+        {activeTab === 'learning' && <ActiveLearningView active={workspaceTab === 'building'} />}
 
-        {/* ── TAB 1: CAMERA MANAGEMENT ───────────────────────────────────── */}
-        {activeTab === 'camera' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-
-            {/* Add Camera Form */}
-            <div style={cardStyle}>
-              <h2 style={{ fontSize: '15px', fontWeight: 700, color: C.textPrimary, marginBottom: '18px', letterSpacing: '-0.01em' }}>
-                Đăng ký Luồng Camera Mới
-              </h2>
-              <form onSubmit={handleAddCamera} style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Tên Camera</label>
-                  <input type="text" value={newCamName} onChange={e => setNewCamName(e.target.value)}
-                    placeholder="VD: Cổng chính, Kho A..." style={inputStyle} {...focusHandlers} />
-                </div>
-                <div style={{ flex: 2 }}>
-                  <label style={labelStyle}>IP Address hoặc RTSP URL</label>
-                  <input type="text" value={newCamUrl} onChange={e => setNewCamUrl(e.target.value)}
-                    placeholder="192.168.1.100 hoặc rtsp://..." style={inputStyle} {...focusHandlers} />
-                </div>
-                <GradientBtn isDark={isDark} style={{ whiteSpace: 'nowrap', alignSelf: 'flex-end', height: '42px' }}>
-                  <Plus size={15} /> Thêm Camera
-                </GradientBtn>
-              </form>
-            </div>
-
-            {/* Camera Table */}
-            {cameras.length === 0 ? (
-              <EmptyState
-                colors={C}
-                icon={<CameraIcon size={36} strokeWidth={1.2} />}
-                title="Chưa có camera nào được đăng ký"
-                hint={`Điền tên và IP/RTSP URL vào form ở trên, sau đó bấm <span style='color:${C.accentL};font-weight:600'>+ Thêm Camera</span>`}
-              />
-            ) : (
-              <div style={{ background: C.card, borderRadius: '12px', border: `1px solid ${C.border}`, overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ background: C.cardAlt, borderBottom: `1px solid ${C.border}` }}>
-                      {['ID', 'TÊN CAMERA', 'RTSP URL', 'TRẠNG THÁI', 'THAO TÁC'].map((h, i) => (
-                        <th key={h} style={{
-                          padding: '13px 16px', fontSize: '11px', fontWeight: 700,
-                          color: C.textLabel, fontFamily: 'JetBrains Mono, monospace',
-                          letterSpacing: '0.06em', textAlign: i === 4 ? 'right' : 'left',
-                        }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cameras.map(c => (
-                      <tr key={c.id} style={{ borderBottom: `1px solid ${C.borderSubtle}`, transition: 'background 0.15s' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = C.accentDim)}
-                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                        <td style={{ padding: '14px 16px', color: C.textMuted, fontFamily: 'monospace', fontSize: '12px' }}>#{c.id}</td>
-                        <td style={{ padding: '14px 16px', fontWeight: 700, color: C.textPrimary, fontSize: '13px' }}>{c.name}</td>
-                        <td style={{ padding: '14px 16px', color: C.textSub, fontFamily: 'monospace', fontSize: '11px', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.rtsp_url}</td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <span style={{
-                            background: C.cyanDim, color: C.cyanL,
-                            padding: '4px 10px', borderRadius: '20px',
-                            fontSize: '11px', fontWeight: 700, fontFamily: 'monospace',
-                            border: `1px solid ${C.cyanBorder}`,
-                            boxShadow: isDark ? '0 0 8px rgba(6,182,212,0.15)' : 'none',
-                          }}>● Live · WebRTC</span>
-                        </td>
-                        <td style={{ padding: '14px 16px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                            <button onClick={() => setEditCamModal({ open: true, id: c.id, name: c.name, url: c.rtsp_url })}
-                              style={{
-                                background: C.accentDim, border: `1px solid ${C.accentBorder}`,
-                                color: C.accentL, padding: '6px 14px', borderRadius: '6px',
-                                cursor: 'pointer', fontWeight: 600, fontSize: '12px',
-                                fontFamily: "'Space Grotesk', sans-serif", transition: 'all 0.15s',
-                              }}>Sửa</button>
-                            <button onClick={() => handleDeleteCamera(c.id)}
-                              style={{
-                                background: C.roseDim, border: `1px solid ${C.roseBorder}`,
-                                color: C.rose, padding: '6px 14px', borderRadius: '6px',
-                                cursor: 'pointer', fontWeight: 600, fontSize: '12px',
-                                fontFamily: "'Space Grotesk', sans-serif", transition: 'all 0.15s',
-                              }}>Xóa</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'camera' && <CameraSources active={workspaceTab === 'building'}
+          onEdit={camera => setEditCamModal({ open: true, id: camera.id, name: camera.name, url: camera.rtsp_url })}
+          onDelete={handleDeleteCamera} onRules={cameraId => { setSelectedCamId(cameraId); setActiveTab('rules'); }}
+          onAdd={(name, url) => { setNewCamName(name); setNewCamUrl(url); setShowAuthModal(true); }} />}
 
         {/* ── TAB 2: RULES ───────────────────────────────────────────────── */}
         {activeTab === 'rules' && (
@@ -1025,232 +748,6 @@ export default function BuildingView() {
           </div>
         )}
 
-        {/* ── TAB 3: LABEL ─────────────────────────────────────────────── */}
-        {activeTab === 'label' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: '20px' }}>
-            <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <h3 style={{ fontSize: '14px', fontWeight: 700, color: C.textPrimary, margin: '0 0 8px 0' }}>
-                  Gán nhãn Tracking
-                </h3>
-                <div style={{ background: C.cardAlt, border: `1px solid ${C.border}`, borderRadius: '8px', padding: '12px', fontSize: '12px', color: C.textSub, lineHeight: 1.7 }}>
-                  Khoanh sát vật → Tạo mask → chỉnh + Vật / − Nền → lưu nhãn. Chọn lại cùng nhãn để thêm góc nhìn. Chỉ nhãn robot/kệ đã đăng ký được bám mask; nhận diện người giữ nguyên.
-                </div>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Chọn Camera</label>
-                <select disabled={isSavingLabel} value={labelCamId} onChange={e => {
-                  const newCamId = e.target.value;
-                  setLabelCamId(newCamId);
-                  resetLabelMaskState();
-                  setLabelStatus('');
-                  fetchRegisteredTargets(newCamId);
-                }} style={selectStyle} {...focusHandlers}>
-                  {cameras.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Loại đối tượng</label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                  {([
-                    ['robot', 'Robot', <Bot key="robot" size={14} />],
-                    ['rack', 'Kệ', <Package key="rack" size={14} />],
-                    ['person', 'Người', <Tag key="person" size={14} />],
-                  ] as const).map(([value, label, icon]) => {
-                    const active = labelCategory === value;
-                    return (
-                      <button key={value} disabled={isSavingLabel} type="button" onClick={() => {
-                        setLabelCategory(value);
-                        resetLabelMaskState(false);
-                        if (!labelName.trim() || ['Robot_9001', 'Rack_A1', 'Person_01'].includes(labelName)) {
-                          setLabelName(value === 'robot' ? 'Robot_9001' : value === 'rack' ? 'Rack_A1' : 'Person_01');
-                        }
-                      }} style={{
-                        padding: '9px 8px', borderRadius: '8px', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                        background: active ? C.accentDim : 'transparent',
-                        border: `1px solid ${active ? C.accentBorder : C.borderHard}`,
-                        color: active ? C.accentL : C.textSub,
-                        fontSize: '12px', fontWeight: 700,
-                      }}>
-                        {icon}{label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Tên định danh / Label</label>
-                <input disabled={isSavingLabel} value={labelName} onChange={e => setLabelName(e.target.value)} placeholder="VD: Robot_9001, Rack_A1..." style={inputStyle} {...focusHandlers} />
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button type="button" disabled={isSavingLabel} onClick={() => { resetLabelMaskState(); setSnapshotTimestamp(Date.now()); setLabelStatus(''); }} style={{
-                  flex: 1, padding: '10px', borderRadius: '8px', cursor: 'pointer',
-                  background: C.cardAlt, color: C.textLabel, border: `1px solid ${C.borderHard}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                  fontSize: '12px', fontWeight: 700,
-                }}>
-                  <RefreshCw size={14} /> Chụp frame
-                </button>
-                <GradientBtn isDark={isDark} onClick={handleSaveLabelCrop} disabled={!labelCrop || !labelName.trim() || isSavingLabel || maskBusy || !labelFrameReady || (labelCategory !== 'person' && !labelMask)} style={{ flex: 1, justifyContent: 'center' }}>
-                  <Crop size={14} /> {isSavingLabel ? 'Đang lưu...' : 'Lưu góc nhìn'}
-                </GradientBtn>
-              </div>
-
-              {labelCategory !== 'person' && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <GradientBtn isDark={isDark} onClick={() => generateLabelMask()} disabled={!maskAvailable || !labelCrop || labelCrop.w <= 0 || labelCrop.h <= 0 || !labelName.trim() || !labelFrameReady || maskBusy || isSavingLabel}>
-                  <Crop size={14} /> {maskBusy ? 'Đang tạo mask…' : 'Tạo mask'}
-                </GradientBtn>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {([['box', 'Khoanh lại'], ['add', '+ Vật'], ['remove', '− Nền']] as const).map(([tool, title]) =>
-                    <button key={tool} type="button" disabled={maskBusy || isSavingLabel} onClick={() => setMaskTool(tool)}
-                      style={{ ...tabStyle(maskTool === tool), padding: '7px 9px', fontSize: '11px' }}>{title}</button>)}
-                </div>
-                <div style={{ fontSize: '11px', color: maskAvailable ? C.textMuted : C.amber }}>
-                  {maskAvailable ? `${maskPoints.length}/64 điểm chỉnh mask · Lưu góc nhìn không giới hạn số lần` : 'Model mask chưa sẵn sàng. Các nhãn cũ vẫn được giữ.'}
-                </div>
-                <div style={{ fontSize: '12px', color: C.textMuted, lineHeight: 1.7 }}>
-                  Cùng một vật: chọn lại đúng nhãn và thêm góc nhìn. Vật khác phải có nhãn khác. Chỉ các mẫu bạn xác nhận được dùng để học; hệ thống không học từ mask tự dự đoán.
-                  <br />Triplet metric: {identityLearning?.training ? 'đang học nền trên GPU' : identityLearning?.revision ? `đang áp dụng phiên bản ${identityLearning.revision}` : 'chờ ít nhất 2 ảnh khác nhau của cùng vật và 1 ảnh của vật khác'}
-                  {` · ${identityLearning?.samples || 0} mẫu đặc trưng riêng biệt`}
-                  {identityLearning?.last_error && <span style={{ color: C.amber }}> · Học chưa hoàn tất: {identityLearning.last_error}</span>}
-                </div>
-              </div>}
-
-              {labelStatus && (
-                <div style={{ padding: '11px 14px', background: labelStatus.startsWith('Lỗi') ? C.roseDim : C.emeraldDim, color: labelStatus.startsWith('Lỗi') ? C.rose : C.emerald, borderRadius: '8px', fontSize: '12px', border: `1px solid ${labelStatus.startsWith('Lỗi') ? C.roseBorder : C.emeraldBorder}` }}>
-                  {labelStatus}
-                </div>
-              )}
-
-              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: '14px' }}>
-                <h4 style={{ ...labelStyle, marginBottom: '10px' }}>
-                  Label của {cameras.find(c => c.id === labelCamId)?.name || 'Camera này'} ({registeredTargets.length})
-                </h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '290px', overflowY: 'auto' }}>
-                  {registeredTargets.length === 0 ? (
-                    <EmptyState colors={C} icon={<Tag size={28} strokeWidth={1.3} />} title="Chưa có label nào trên Camera này" hint="Crop frame camera rồi lưu label để gán nhãn riêng cho camera này." />
-                  ) : (
-                    registeredTargets.map(tgt => {
-                      const camName = cameras.find(c => c.id === (tgt.cam_id || tgt.last_cam || ''))?.name || 'Camera';
-                      return (
-                        <div key={tgt.key || tgt.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '8px', background: C.cardAlt, border: `1px solid ${C.border}` }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ fontSize: '13px', fontWeight: 800, color: C.textPrimary, fontFamily: 'monospace' }}>{tgt.label}</span>
-                              <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: C.accentDim, color: C.accentL, fontWeight: 700, border: `1px solid ${C.accentBorder}` }}>
-                                {`${tgt.samples_count || 1} lần đăng ký · ∞`}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: '11px', color: C.textMuted, marginTop: '3px' }}>
-                              {tgt.category || 'object'}{tgt.fms_robot_id ? ` · FMS ${tgt.fms_robot_id}` : ''} · {camName}
-                              {` · ${tgt.mask_samples_count || 0} mẫu mask`}
-                            </div>
-                            {(!tgt.bbox || !tgt.has_crop_image) && (
-                              <div style={{ fontSize: '10px', color: C.amber, marginTop: '4px', fontWeight: 800, fontFamily: 'monospace' }}>
-                                CHƯA CÓ MẪU CROP ĐỂ TRACKING
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button type="button" title="Thêm góc nhìn cho cùng vật" onClick={() => handleUseRegisteredTarget(tgt)} style={{ background: C.cyanDim, border: `1px solid ${C.cyanBorder}`, color: C.cyanL, borderRadius: '6px', padding: '7px', cursor: 'pointer', display: 'flex', gap: '5px', alignItems: 'center', fontSize: '11px' }}>
-                              <Plus size={14} /> Góc nhìn
-                            </button>
-                            <button
-                              type="button"
-                              title={`Xóa nhãn '${tgt.label}' trên ${camName}`}
-                              onClick={() => handleDeleteRegisteredTarget(tgt.label, tgt.cam_id || labelCamId)}
-                              style={{ background: C.roseDim, border: `1px solid ${C.roseBorder}`, color: C.rose, borderRadius: '6px', padding: '7px', cursor: 'pointer', display: 'flex' }}>
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', minHeight: '560px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: C.textLabel, display: 'flex', alignItems: 'center', gap: '7px' }}>
-                  <Crop size={15} /> {labelCategory === 'person' ? 'Frame Crop Label' : 'Mask nhãn đăng ký'}
-                </span>
-                {labelCrop && (
-                  <span style={{ fontSize: '11px', color: C.textMuted, fontFamily: 'monospace' }}>
-                    x:{labelCrop.x.toFixed(2)} y:{labelCrop.y.toFixed(2)} w:{labelCrop.w.toFixed(2)} h:{labelCrop.h.toFixed(2)}
-                  </span>
-                )}
-              </div>
-
-              <div style={{ position: 'relative', width: '100%', aspectRatio: '16/9', background: '#020306', borderRadius: '10px', overflow: 'hidden', border: `1px solid ${C.borderHard}` }}>
-                {labelCamId ? (
-                  <img
-                    ref={labelImageRef}
-                    key={`label-${labelCamId}-${snapshotTimestamp}`}
-                    src={`/api/backend/camera/${labelCamId}/snapshot?t=${snapshotTimestamp}`}
-                    alt="Label Snapshot"
-                    onLoad={() => setLabelFrameReady(true)}
-                    onError={() => { setLabelFrameReady(false); setLabelStatus('Lỗi tải ảnh camera. Hãy chụp lại frame.'); }}
-                    style={{ width: '100%', height: '100%', objectFit: 'fill', position: 'absolute', inset: 0 }}
-                  />
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: C.textMuted, fontSize: '13px', flexDirection: 'column', gap: '8px' }}>
-                    <CameraIcon size={32} strokeWidth={1} />
-                    <span>Chọn camera để chụp frame</span>
-                  </div>
-                )}
-
-                <svg
-                  viewBox="0 0 1 1"
-                  preserveAspectRatio="none"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'crosshair', zIndex: 5 }}
-                  onMouseDown={e => {
-                    if (!labelFrameReady || maskBusy || isSavingLabel) return;
-                    const p = getNormPoint(e);
-                    if (labelCategory !== 'person' && maskTool !== 'box') {
-                      if (!labelCrop || maskPoints.length >= 64) return;
-                      const corrections = [...maskPoints, { point: [p.x, p.y], label: maskTool === 'add' ? 1 : 0 }];
-                      setMaskPoints(corrections);
-                      generateLabelMask(corrections);
-                      return;
-                    }
-                    maskRequest.current += 1;
-                    setLabelMask(null);
-                    setMaskPoints([]);
-                    setCropStart(p);
-                    setLabelCrop({ x: p.x, y: p.y, w: 0, h: 0 });
-                  }}
-                  onMouseMove={e => {
-                    if (!cropStart) return;
-                    updateLabelCrop(cropStart, getNormPoint(e));
-                  }}
-                  onMouseUp={e => {
-                    if (!cropStart) return;
-                    updateLabelCrop(cropStart, getNormPoint(e));
-                    setCropStart(null);
-                  }}
-                  onMouseLeave={() => setCropStart(null)}
-                >
-                  {labelCrop && (
-                    <>
-                      <rect x="0" y="0" width="1" height="1" fill="rgba(0,0,0,0.28)" />
-                      {labelMask ? <path d={maskPath(labelMask)} fill="rgba(34,211,238,0.28)" fillRule="evenodd" stroke="#22d3ee" strokeWidth="0.002" />
-                        : <rect x={labelCrop.x} y={labelCrop.y} width={labelCrop.w} height={labelCrop.h} fill="rgba(34,211,238,0.12)" stroke="#22d3ee" strokeWidth="0.004" />}
-                      <text x={labelCrop.x} y={Math.max(0.03, labelCrop.y - 0.012)} fill="#22d3ee" fontSize="0.028" fontWeight="bold">{labelName || 'Label'}</text>
-                    </>
-                  )}
-                  {maskPoints.map((item, index) => <circle key={index} cx={item.point[0]} cy={item.point[1]} r="0.006" fill={item.label ? '#22c55e' : '#ef4444'} stroke="white" strokeWidth="0.001" />)}
-                </svg>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ── AUTH MODAL ──────────────────────────────────────────────────────── */}

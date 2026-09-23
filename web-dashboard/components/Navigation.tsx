@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Video, Building2, Bot, BarChart3, Crosshair } from 'lucide-react';
+import { Video, Building2, Bot, BarChart3, Crosshair, GitBranch, Terminal } from 'lucide-react';
 import { useLanguage } from './LanguageContext';
 import { useTab, type TabType } from './TabContext';
 import styles from './DashboardShell.module.css';
@@ -12,6 +12,8 @@ export const workspaceTabs = [
   { id: 'calibration', labelKey: 'calibration', icon: Crosshair, keywords: 'calibration hiệu chuẩn camera fms tọa độ chấm điểm' },
   { id: 'robot_map', labelKey: 'robotMap', icon: Bot, keywords: 'map robot 3d bản đồ fms' },
   { id: 'analytics', labelKey: 'analytics', icon: BarChart3, keywords: 'analytics report phân tích báo cáo' },
+  { id: 'workflow', labelKey: 'workflow', icon: GitBranch, keywords: 'workflow editor deploy pipeline tác vụ quy trình' },
+  { id: 'logs', labelKey: 'logs', icon: Terminal, keywords: 'system logs nhật ký hệ thống lỗi truy vấn' },
 ] as const;
 
 export default function Navigation({ onNavigate }: { onNavigate?: (tab: TabType) => void }) {

@@ -1,0 +1,29 @@
+.root { color: var(--text-primary); }
+.header { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+.header h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 18px; }
+.root p, .root small { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.layout { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 20px; margin-top: 20px; }
+.upload, .models article, .runtime { padding: 20px; border: 1px solid var(--border); background: var(--bg-card); border-radius: 12px; }
+.upload { display: flex; flex-direction: column; gap: 14px; align-self: start; }
+.upload label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.root input, .root textarea, .root button { border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); border-radius: 8px; padding: 10px; font-size: 12px; max-width: 100%; }
+.root button { display: inline-flex; gap: 8px; justify-content: center; align-items: center; cursor: pointer; }
+.root button:disabled { opacity: .45; cursor: wait; }
+.upload > button { background: #137f76; color: white; border-color: #148f82; }
+.root textarea { min-height: 80px; resize: vertical; }
+.root progress { width: 100%; accent-color: #14a08c; }
+.root details { font-size: 12px; line-height: 1.8; }
+.root summary { cursor: pointer; }
+.root code { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.root pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; font-size: 10px; }
+.models { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.models article strong { font-size: 14px; }
+.models [data-state] { color: #c99534; font-size: 11px; }
+.models [data-state='ready'] { color: #24b592; }
+.models [data-state='failed'], .root .error { color: #e5676e; }
+.runtime { font-size: 12px; }
+.runtime span { display: block; color: var(--text-muted); margin-top: 8px; }
+.cameraChoice { display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer; }
+.cameraChoice input { accent-color: #14a08c; }
+.root .message { color: #20a489; }
+@media (max-width: 950px) { .layout { grid-template-columns: 1fr; } }

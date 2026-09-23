@@ -7,14 +7,24 @@ import BuildingView from '../components/views/BuildingView';
 import RobotMap3DView from '../components/views/RobotMap3DView';
 import AnalyticsView from '../components/views/AnalyticsView';
 import CalibrationView from '../components/views/CalibrationView';
+import dynamic from 'next/dynamic';
+
+const WorkflowView = dynamic(() => import('../components/views/WorkflowView'), { ssr: false });
+const SystemLogsView = dynamic(() => import('../components/views/SystemLogsView'), { ssr: false });
 
 export default function DashboardRoot() {
   const { activeTab } = useTab();
   const [calibrationOpened, setCalibrationOpened] = useState(false);
+  const [workflowOpened, setWorkflowOpened] = useState(false);
   useEffect(() => { if (activeTab === 'calibration') setCalibrationOpened(true); }, [activeTab]);
+  useEffect(() => { if (activeTab === 'workflow') setWorkflowOpened(true); }, [activeTab]);
 
   return (
     <>
+      {activeTab === 'logs' && <SystemLogsView />}
+      <div style={{ display: activeTab === 'workflow' ? 'block' : 'none' }}>
+        {(workflowOpened || activeTab === 'workflow') && <WorkflowView active={activeTab === 'workflow'} />}
+      </div>
       <div style={{ display: activeTab === 'calibration' ? 'block' : 'none' }}>
         {(calibrationOpened || activeTab === 'calibration') && <CalibrationView active={activeTab === 'calibration'} />}
       </div>
@@ -27,7 +37,7 @@ export default function DashboardRoot() {
           minHeight: 'calc(100vh - 74px)',
         }}
       >
-        <MonitorView />
+        <MonitorView isActive={activeTab === 'monitor'} />
       </div>
 
       <div

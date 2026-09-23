@@ -1,11 +1,9 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import React from 'react';
-import DashboardShell from '../components/DashboardShell';
+import WorkspaceLayout from '../components/WorkspaceLayout';
 import { LanguageProvider } from '../components/LanguageContext';
 import { ThemeProvider } from '../components/ThemeContext';
-import { TabProvider } from '../components/TabContext';
-import { CameraProvider } from '../components/CameraContext';
 
 export const metadata: Metadata = {
   title: 'VMS-RTC',
@@ -22,12 +20,8 @@ export default function RootLayout({
       <body>
         <ThemeProvider>
           <LanguageProvider>
-            <CameraProvider>
-              <TabProvider>
-                <DashboardShell>{children}</DashboardShell>
-            </TabProvider>
-          </CameraProvider>
-        </LanguageProvider>
+            <WorkspaceLayout>{children}</WorkspaceLayout>
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -16,6 +16,8 @@ const descriptions = {
   calibration: { en: 'Match camera points to your FMS floor map.', vi: 'Ghép điểm camera với bản đồ FMS — một hệ tọa độ cho tracking và 3D.' },
   robot_map: { en: 'Your fleet and workspace, connected in real time.', vi: 'Kết nối đội robot và không gian vận hành theo thời gian thực.' },
   analytics: { en: 'Explore activity, reports and operational insights.', vi: 'Theo dõi hoạt động, báo cáo và dữ liệu vận hành.' },
+  workflow: { en: 'Build, deploy and supervise your vision workflows.', vi: 'Thiết kế, triển khai và theo dõi pipeline xử lý Vision.' },
+  logs: { en: 'Search structured system logs and compressed archives.', vi: 'Truy vấn nhật ký hệ thống và kho lưu trữ nén.' },
 };
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -170,7 +172,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         </header>
         <main id="workspace-content" tabIndex={-1} className={styles.content}>{children}</main>
       </div>
-      <ChatbotWidget />
+      {activeTab !== 'monitor' && <ChatbotWidget />}
     </div>
   );
 }

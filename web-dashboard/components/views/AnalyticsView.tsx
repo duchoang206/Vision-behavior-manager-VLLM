@@ -7,8 +7,9 @@ import {
 } from 'recharts';
 import {
   ArrowRightLeft, UserCheck, History, MapPin, Activity, Database,
-  Cpu, GitMerge, Video, Download, Play, X, ShieldAlert, Clock
+  Video, Download, Play, X, ShieldAlert, Clock, Trash2
 } from 'lucide-react';
+import RecordingJournal from './RecordingJournal';
 
 type ThemeColors = {
   accent: string;
@@ -86,20 +87,12 @@ const getKpis = (data: DashboardAnalytics, C: ThemeColors): KpiDef[] => [
     icon: <Database size={20} />,
     color: C.rose, dim: C.roseDim, border: C.roseBorder, glow: C.roseBorder,
   },
-  {
-    label: 'ĐỘ TRỄ GPU', value: data.gpu_latency_ms != null ? `${data.gpu_latency_ms} ms` : 'N/A', sub: 'TensorRT FP16 Zero-Copy',
-    icon: <Cpu size={20} />,
-    color: C.cyanL, dim: C.cyanDim, border: C.cyanBorder, glow: C.cyanBorder,
-  },
-  {
-    label: 'MTMC FUSION', value: data.system_efficiency != null ? `${data.system_efficiency}%` : 'N/A', sub: 'Hungarian Re-ID',
-    icon: <GitMerge size={20} />,
-    color: C.violet, dim: C.violetDim, border: C.violetBorder, glow: C.violetBorder,
-  },
 ];
 
 // ─── Event Interface ─────────────────────────────────────────────────────────
 interface EventRecord {
+  id?: number;
+  recording_id?: string;
   camera: string;
   type: string;
   roi_status?: string;
@@ -228,6 +221,8 @@ export default function AnalyticsView() {
   const [journeyData, setJourneyData] = useState<JourneyData | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedVideoEvent, setSelectedVideoEvent] = useState<EventRecord | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const fetchData = async () => {
     try {
@@ -263,9 +258,25 @@ export default function AnalyticsView() {
     } catch { setJourneyData(null); } finally { setSearchLoading(false); }
   };
 
-  const handleDownloadVideo = (e: React.MouseEvent, vfile: string) => {
+  const handleDownloadVideo = (e: React.MouseEvent, recordId: string) => {
     e.preventDefault();
-    alert(`[BẢO MẬT VMS]\nFile: ${vfile}\nVideo đang được lưu an toàn tại máy chủ lưu trữ (/var/vms/recordings/).\nTính năng tải file trực tiếp về máy cục bộ yêu cầu quyền Quản trị viên (Admin Level 2).`);
+    window.location.assign(`/api/backend/recordings/${encodeURIComponent(recordId)}/video?download=true`);
+  };
+
+  const deleteHistory = async (eventId?: number) => {
+    const before = new Date().toISOString();
+    if (!confirm(eventId ? 'Xóa sự kiện này? MP4 gốc vẫn được giữ.' : 'Xóa toàn bộ lịch sử Analytics đến hiện tại (sự kiện, vết di chuyển, thống kê)? Camera, nhãn, calibration và MP4 được giữ nguyên. Không thể hoàn tác.')) return;
+    setDeleteBusy(true); setDeleteError('');
+    try {
+      const response = await fetch(eventId ? `/api/backend/events/${eventId}` : '/api/backend/analytics/history', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: eventId ? undefined : JSON.stringify({ before, confirmation: 'DELETE_ANALYTICS_HISTORY' }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Không xóa được lịch sử.');
+      setJourneyData(null); setSelectedVideoEvent(null); await fetchData();
+    } catch (reason) { setDeleteError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setDeleteBusy(false); }
   };
 
   // Shared styles
@@ -366,7 +377,7 @@ export default function AnalyticsView() {
         )}
 
         {/* ── KPI Cards ────────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px' }}>
           {getKpis(data, C).map((k, i) => (
             <div key={i} style={{
               background: isDark ? 'rgba(13,17,23,0.8)' : 'rgba(255,255,255,0.95)',
@@ -494,7 +505,7 @@ export default function AnalyticsView() {
                   </div>
                 ) : (
                   (data.tripwire_stats || []).map((t, i) => (
-                    <div key={i} style={{
+                    <div key={`${t.rule_id}-${t.cam_id}-${i}`} style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '11px 14px', background: C.cardAlt,
                       borderRadius: '8px', border: `1px solid ${C.border}`,
@@ -549,6 +560,9 @@ export default function AnalyticsView() {
               </span>
             </div>
 
+            <RecordingJournal />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><strong style={{ color: C.textPrimary, fontSize: 12 }}>SỰ KIỆN HÀNH VI</strong><button disabled={deleteBusy} onClick={() => void deleteHistory()} style={{ background: C.roseDim, color: C.rose, border: `1px solid ${C.roseBorder}`, borderRadius: 6, padding: '7px 10px', cursor: 'pointer', fontSize: 11 }}>Xóa lịch sử cũ</button></div>
+            {deleteError && <p role="alert" style={{ color: C.rose, fontSize: 12 }}>{deleteError}</p>}
             <div style={{ flex: 1, overflowY: 'auto', maxHeight: '520px', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
               {(data.recent_events || []).length === 0 ? (
                 <div style={{
@@ -614,6 +628,7 @@ export default function AnalyticsView() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: C.textMuted, fontSize: '11px', fontFamily: 'monospace' }}>
                           <Clock size={12} />
                           <span>{ev.time}</span>
+                          {ev.id && <button aria-label={`Xóa sự kiện ${ev.id}`} disabled={deleteBusy} onClick={() => void deleteHistory(ev.id)} style={{ border: 'none', background: 'transparent', color: C.rose, cursor: 'pointer', padding: 5 }}><Trash2 size={13} /></button>}
                         </div>
                       </div>
 
@@ -646,7 +661,7 @@ export default function AnalyticsView() {
                         </div>
 
                         {/* Actions: Play Video / Download */}
-                        {videoFileName && (
+                        {videoFileName && ev.recording_id && (
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button
                               onClick={() => setSelectedVideoEvent({ ...ev, video_file: videoFileName })}
@@ -661,7 +676,7 @@ export default function AnalyticsView() {
                               <Play size={11} fill={C.accentL} /> Xem MP4
                             </button>
                             <button
-                              onClick={(e) => handleDownloadVideo(e, videoFileName)}
+                              onClick={(e) => handleDownloadVideo(e, ev.recording_id!)}
                               style={{
                                 display: 'flex', alignItems: 'center', gap: '4px',
                                 background: 'transparent', border: `1px solid ${C.borderHard}`,
@@ -732,7 +747,7 @@ export default function AnalyticsView() {
             }}>
               <video
                 key={selectedVideoEvent.video_file}
-                src={`/recordings/${selectedVideoEvent.video_file}`}
+                src={`/api/backend/recordings/${selectedVideoEvent.recording_id}/video`}
                 controls
                 autoPlay
                 loop
@@ -770,7 +785,7 @@ export default function AnalyticsView() {
                 </div>
               </div>
               <button
-                onClick={(e) => selectedVideoEvent.video_file && handleDownloadVideo(e, selectedVideoEvent.video_file)}
+                onClick={(e) => selectedVideoEvent.recording_id && handleDownloadVideo(e, selectedVideoEvent.recording_id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',

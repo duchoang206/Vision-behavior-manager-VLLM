@@ -6,6 +6,8 @@ export const translations = {
       calibration: 'Calibration',
       robotMap: 'Map Robot 3D',
       operation: 'Operation',
+      workflow: 'Workflow Editor',
+      logs: 'System Logs',
       analytics: 'Analytics',
     },
     header: {
@@ -87,6 +89,8 @@ export const translations = {
       calibration: 'Calibration',
       robotMap: 'Bản đồ Robot 3D',
       operation: 'Vận hành',
+      workflow: 'Workflow Editor',
+      logs: 'System Logs',
       analytics: 'Thống kê',
     },
     header: {
