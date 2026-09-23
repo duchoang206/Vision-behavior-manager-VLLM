@@ -17,6 +17,7 @@ from core.mediamtx_client import camera_relay_url
 from core.rtsp_reader import RTSPLatestFrameReader
 from core.registered_target_mask import eligible_target, registered_target_mask_segmenter
 from core.mask_motion import MaskMotionPropagator
+from core.registered_identity_metrics import registered_identity_metrics
 
 
 def _normalize_bbox(bbox: Optional[List[float]]) -> Optional[List[float]]:
@@ -410,6 +411,10 @@ class TemplateIdentityCameraTracker:
             q_vec = encode_crop(crop)
             if q_vec is None or len(q_vec) != 512:
                 return None
+            verification = registered_identity_metrics.verify(target["label"], q_vec)
+            if verification is not None:
+                target["identity_metric"] = verification
+                return max(0.0, verification.get("score", 0.0)) if verification["accepted"] else 0.0
             q_arr = np.asarray(q_vec, dtype=np.float32)
             q_norm = float(np.linalg.norm(q_arr))
             if q_norm < 1e-6:
@@ -765,6 +770,8 @@ class TemplateIdentityCameraTracker:
                 found = self._local_template_search(frame, target)
                 if found:
                     candidate_bbox, score = found
+                    if target.get("reid_vectors"):
+                        score = self._score_at_bbox(frame, target, candidate_bbox)
             if score < self.init_min_score:
                 target["confidence"] = float(score)
                 target["lost"] = target.get("lost", 0) + 1
@@ -804,6 +811,8 @@ class TemplateIdentityCameraTracker:
         found = self._local_template_search(frame, target)
         if found:
             found_bbox, score = found
+            if target.get("reid_vectors"):
+                score = self._score_at_bbox(frame, target, found_bbox)
             previous_center = np.asarray(_bbox_center(target["bbox"]))
             found_center = np.asarray(_bbox_center(found_bbox))
             jump = float(np.linalg.norm(found_center - previous_center) /
@@ -957,9 +966,9 @@ class TemplateIdentityCameraTracker:
                     fallback[target["label"]] = obj
                     if eligible_target(target) and obj.get("tracking_state") == "tracked":
                         seeds[target["label"]] = [obj["x"], obj["y"], obj["w"], obj["h"]]
-            elif eligible_target(target) and target.get("bbox") and not target.get("mask"):
-                seeds[target["label"]] = target["bbox"]
-        observations = registered_target_mask_segmenter.track(self.cam_id, frame, mask_targets, seeds) if mask_enabled else {}
+            elif eligible_target(target) and target.get("bbox"):
+                seeds[target["label"]] = self._predict_bbox(target, now=decoded_at) if target.get("mask") else target["bbox"]
+        observations = registered_target_mask_segmenter.track(self.cam_id, frame, mask_targets, seeds, observed_at=decoded_at) if mask_enabled else {}
         max_mask_age = float(os.getenv("REGISTERED_MASK_MAX_AGE", "0.5"))
         if time.time() - decoded_at > max_mask_age:
             self.stale_mask_frames += 1
@@ -972,7 +981,12 @@ class TemplateIdentityCameraTracker:
             observation = observations.get(target["label"]) if eligible_target(target) else None
             if observation and observation.get("identity_rejected"):
                 target.update(mask=None, mask_observed_at=None, has_matched=False, velocity=[0.0] * 4,
-                              identity_rejection=observation.get("identity"))
+                              lost=target.get("lost", 0) + 1, identity_rejection=observation.get("identity"))
+                self.mask_motion.tracks.pop(target["label"], None)
+                continue
+            if observation and observation.get("tracking_lost"):
+                target.update(mask=None, mask_observed_at=None, has_matched=False,
+                              lost=target.get("lost", 0) + 1, velocity=[0.0] * 4)
                 self.mask_motion.tracks.pop(target["label"], None)
                 continue
             if observation and observation.get("mask"):
@@ -1001,6 +1015,9 @@ class TemplateIdentityCameraTracker:
                 objects.append(obj)
                 continue
             target["mask"] = None
+            if mask_enabled and eligible_target(target):
+                target["lost"] = target.get("lost", 0) + 1
+                target["has_matched"] = False
             if target["label"] in fallback:
                 objects.append(fallback[target["label"]])
             elif not mask_enabled or not eligible_target(target):
