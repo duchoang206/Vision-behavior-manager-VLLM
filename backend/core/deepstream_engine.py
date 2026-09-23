@@ -23,6 +23,7 @@ from core.camera_calibrator import camera_calibrator
 from core.behavior_analytics import behavior_engine
 from core.database import db_manager
 from core.identity_utils import identity_global_id, robot_number_from_label
+from core.deepstream_masktracker import native_masktracker_enabled, prepare_native_tracker_config
 from core.deepstream_pose import frame_poses, attach_poses
 from core.person_analytics import person_ground_point
 from core.temporal_stabilizer import TemporalDetectionStabilizer
@@ -267,36 +268,6 @@ class DeepStreamManager:
             self.muxer.set_property("sync-inputs", False)
         self.pipeline.add(self.muxer)
 
-        # 2. nvinfer - Primary YOLO inference (reads .engine file)
-        self.pgie = Gst.ElementFactory.make("nvinfer", "primary-yolo-detector")
-        if not self.pgie:
-            raise RuntimeError("[DeepStreamManager] Failed to create nvinfer - DeepStream plugin missing")
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models_config", "config_infer_primary.txt")
-        if not os.path.exists(config_path):
-            raise RuntimeError(f"[DeepStreamManager] nvinfer config not found: {config_path}")
-        self.pgie.set_property("config-file-path", config_path)
-        self.pipeline.add(self.pgie)
-
-        # 3. nvtracker - NvDCF/ByteTracker per-stream tracking
-        self.tracker = Gst.ElementFactory.make("nvtracker", "nvtracker-engine")
-        if not self.tracker:
-            raise RuntimeError("[DeepStreamManager] Failed to create nvtracker")
-        tracker_config_path = os.getenv(
-            "DEEPSTREAM_TRACKER_CONFIG",
-            "/app/models_config/tracker_config.yml",
-        )
-        if not os.path.exists(tracker_config_path):
-            raise RuntimeError(f"[DeepStreamManager] tracker config not found: {tracker_config_path}")
-        tracker_lib = "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so"
-        if not os.path.exists(tracker_lib):
-            raise RuntimeError(f"[DeepStreamManager] nvtracker lib not found: {tracker_lib}")
-        self.tracker.set_property("ll-config-file", tracker_config_path)
-        self.tracker.set_property("ll-lib-file", tracker_lib)
-        self.tracker.set_property("tracker-width", 640)
-        self.tracker.set_property("tracker-height", 384)
-        self.tracker.set_property("gpu-id", 0)
-        self.pipeline.add(self.tracker)
-
         # 4. fakesink - headless (no display, no NVENC encode)
         self.sink = Gst.ElementFactory.make("fakesink", "headless-sink")
         if not self.sink:
@@ -305,24 +276,66 @@ class DeepStreamManager:
         self.sink.set_property("async", False)
         self.pipeline.add(self.sink)
 
-        # Link: muxer -> pgie -> tracker -> fakesink
-        if not self.muxer.link(self.pgie):
-            raise RuntimeError("[DeepStreamManager] Failed to link muxer -> pgie")
-        if not self.pgie.link(self.tracker):
-            raise RuntimeError("[DeepStreamManager] Failed to link pgie -> tracker")
-        if not self.tracker.link(self.sink):
-            raise RuntimeError("[DeepStreamManager] Failed to link tracker -> fakesink")
+        disable_model = os.getenv("DISABLE_DEEPSTREAM_MODEL", "0").lower() in ("1", "true", "yes")
+        if disable_model:
+            # Bypass nvinfer and nvtracker completely: muxer -> fakesink
+            print("[DeepStreamManager] DISABLE_DEEPSTREAM_MODEL=1: Bypassing YOLO inference & tracker. Running pure realtime GPU decoding.", flush=True)
+            if not self.muxer.link(self.sink):
+                raise RuntimeError("[DeepStreamManager] Failed to link muxer -> fakesink")
+            self.pgie = None
+            self.tracker = None
+            print("[DeepStreamManager] Pipeline built successfully: muxer -> fakesink (zero model overhead)", flush=True)
+        else:
+            # 2. nvinfer - Primary YOLO inference (reads .engine file)
+            self.pgie = Gst.ElementFactory.make("nvinfer", "primary-yolo-detector")
+            if not self.pgie:
+                raise RuntimeError("[DeepStreamManager] Failed to create nvinfer - DeepStream plugin missing")
+            config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models_config", "config_infer_primary.txt")
+            if not os.path.exists(config_path):
+                raise RuntimeError(f"[DeepStreamManager] nvinfer config not found: {config_path}")
+            self.pgie.set_property("config-file-path", config_path)
+            self.pipeline.add(self.pgie)
 
-        # Attach metadata probe to tracker src pad
-        tracker_src_pad = self.tracker.get_static_pad("src")
-        if not tracker_src_pad:
-            raise RuntimeError("[DeepStreamManager] Could not get tracker src pad")
-        tracker_src_pad.add_probe(Gst.PadProbeType.BUFFER, self._metadata_probe, 0)
-        print(
-            f"[DeepStreamManager] Pipeline built successfully: muxer->pgie->nvtracker->fakesink "
-            f"(tracker={tracker_config_path})",
-            flush=True,
-        )
+            # 3. nvtracker - NvDCF/ByteTracker per-stream tracking
+            self.tracker = Gst.ElementFactory.make("nvtracker", "nvtracker-engine")
+            if not self.tracker:
+                raise RuntimeError("[DeepStreamManager] Failed to create nvtracker")
+            tracker_config_path = os.getenv(
+                "DEEPSTREAM_TRACKER_CONFIG",
+                "/app/models_config/tracker_config.yml",
+            )
+            if native_masktracker_enabled():
+                tracker_config_path = prepare_native_tracker_config()
+            if not os.path.exists(tracker_config_path):
+                raise RuntimeError(f"[DeepStreamManager] tracker config not found: {tracker_config_path}")
+            tracker_lib = "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so"
+            if not os.path.exists(tracker_lib):
+                raise RuntimeError(f"[DeepStreamManager] nvtracker lib not found: {tracker_lib}")
+            self.tracker.set_property("ll-config-file", tracker_config_path)
+            self.tracker.set_property("ll-lib-file", tracker_lib)
+            self.tracker.set_property("tracker-width", 640)
+            self.tracker.set_property("tracker-height", 384)
+            self.tracker.set_property("gpu-id", 0)
+            self.pipeline.add(self.tracker)
+
+            # Link: muxer -> pgie -> tracker -> fakesink
+            if not self.muxer.link(self.pgie):
+                raise RuntimeError("[DeepStreamManager] Failed to link muxer -> pgie")
+            if not self.pgie.link(self.tracker):
+                raise RuntimeError("[DeepStreamManager] Failed to link pgie -> tracker")
+            if not self.tracker.link(self.sink):
+                raise RuntimeError("[DeepStreamManager] Failed to link tracker -> fakesink")
+
+            # Attach metadata probe to tracker src pad
+            tracker_src_pad = self.tracker.get_static_pad("src")
+            if not tracker_src_pad:
+                raise RuntimeError("[DeepStreamManager] Could not get tracker src pad")
+            tracker_src_pad.add_probe(Gst.PadProbeType.BUFFER, self._metadata_probe, 0)
+            print(
+                f"[DeepStreamManager] Pipeline built successfully: muxer->pgie->nvtracker->fakesink "
+                f"(tracker={tracker_config_path})",
+                flush=True,
+            )
         # NOTE: Bus watch is set up in _run_loop() within the GLib main context thread.
         # Do NOT call bus.add_signal_watch() here (wrong thread context -> segfault).
 
