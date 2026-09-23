@@ -67,7 +67,7 @@ export default function CalibrationRuler({ cameraId, active, snapshot, imageSize
     const timer = window.setTimeout(() => {
       fetch(`/api/backend/camera/${encodeURIComponent(cameraId)}/calibration/measure`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal, cache: 'no-store',
-        body: JSON.stringify({ points }),
+        body: JSON.stringify({ points, points_space: 'raw', calibration_save_id: calibration.save_id }),
       }).then(readResponse).then((data: RulerMeasurement) => {
         if (!controller.signal.aborted && data.camera_id === cameraId) setCompleted({ data, points, calibration });
       }).catch(reason => { if (!controller.signal.aborted) setError(reason.message); })

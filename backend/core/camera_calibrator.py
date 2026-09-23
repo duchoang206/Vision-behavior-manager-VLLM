@@ -58,10 +58,30 @@ class CameraCalibrator:
         return config
 
     def apply_config(self, cam_id, config):
-        checked = self.prepare_config(config["src_points"], config["dst_points"], config.get("matrix"), config)
+        projection_source = config.get("rectified_src_points") if config.get("deepcalib_points_rectified") else None
+        checked = self.prepare_config(projection_source or config["src_points"], config["dst_points"], config.get("matrix"), config)
+        if projection_source is not None:
+            checked["src_points"] = copy.deepcopy(config["src_points"])
+            checked["rectified_src_points"] = copy.deepcopy(projection_source)
+            checked["coverage_polygon"] = copy.deepcopy(config.get("coverage_polygon") or config.get("raw_coverage_polygon"))
+            checked["rectified_coverage_polygon"] = copy.deepcopy(config.get("rectified_coverage_polygon"))
         with self.lock:
             self.homographies[cam_id] = np.asarray(checked["matrix"], dtype=float)
             self.configs[cam_id] = checked
+
+    @staticmethod
+    def _project_input_point(config, x, y):
+        if not config or not config.get("deepcalib_points_rectified"):
+            return float(x), float(y)
+        profile = config.get("intrinsic_profile") or {}
+        try:
+            from deep_calib.geometry import rectify_normalized_point, profile_is_ready
+            if profile_is_ready(profile):
+                rectified = rectify_normalized_point([x, y], profile)
+                return float(rectified[0]), float(rectified[1])
+        except (ImportError, ValueError, TypeError):
+            pass
+        return float("nan"), float("nan")
 
 
     def restore_config(self, cam_id, config):
@@ -96,6 +116,10 @@ class CameraCalibrator:
         to the Floor Plan coordinates (X_floor, Z_floor) in metric meters,
         strictly bounded inside the room's physical SLAM walls.
         """
+        config = self.configs.get(cam_id)
+        x, y = self._project_input_point(config, x, y)
+        if not np.isfinite([x, y]).all():
+            return None, None
         if cam_id == "86c5119c":  # Cam 1 (Showroom Floor)
             MIN_X, MAX_X = 6.5, 11.8
             MIN_Z, MAX_Z = 9.8, 13.0
@@ -148,13 +172,16 @@ class CameraCalibrator:
                 "source": "uncalibrated",
                 "confidence": 0.0,
         }
+        x, y = self._project_input_point(config, x, y)
         if matrix is None or not np.isfinite([x, y]).all():
             return invalid
         projected = matrix @ np.array([x, y, 1.0])
         if not np.isfinite(projected).all() or abs(projected[2]) < 1e-8:
             return dict(invalid, source="invalid_projection")
         floor_x, floor_y = projected[:2] / projected[2]
-        coverage = (config or {}).get("coverage_polygon")
+        coverage = (config or {}).get("rectified_coverage_polygon") if (config or {}).get("deepcalib_points_rectified") else (config or {}).get("coverage_polygon")
+        if not coverage and (config or {}).get("deepcalib_points_rectified"):
+            coverage = (config or {}).get("rectified_src_points")
         inside = not coverage or cv2.pointPolygonTest(np.asarray(coverage, dtype=np.float32), (float(x), float(y)), False) >= 0
         return {
             "x": round(float(floor_x), 4),

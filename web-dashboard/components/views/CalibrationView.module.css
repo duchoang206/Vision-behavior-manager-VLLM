@@ -49,6 +49,25 @@
 .view .selectedControl { background: #d69d3620; border-color: #d69d36; }
 .toolbar label { color: var(--text-muted); font-size: 12px; }
 .toolbar label select { min-width: 130px; }
+.inputPanel { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 16px; font-size: 12px; }
+.inputPanel .caption { padding: 0; margin: 0; }
+.inputPanel label { display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); }
+.inputPanel input { width: 100%; min-width: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elevated); color: var(--text-primary); }
+.inputGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; }
+.deepPanel { display: flex; flex-direction: column; gap: 16px; }
+.deepPanel .guide strong { display: inline-flex; align-items: center; gap: 8px; }
+.deepGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.deepBody { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
+.deepSteps { display: grid; gap: 9px; color: var(--text-muted); font-size: 12px; }
+.deepStepDone { color: #2dbb82; }
+.deepNote { padding: 10px 12px; border: 1px solid #d69d3640; border-radius: 8px; color: #bb8526; font-size: 11px; line-height: 1.6; }
+.deepBody code { color: #2dbb99; font-size: 11px; }
+.pipelineSteps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; font-size: 12px; color: var(--text-muted); }
+.pipelineSteps > span { border: 1px solid var(--border); border-radius: 9px; padding: 12px; background: var(--bg-card); }
+.previewStage { height: clamp(160px, 22vw, 290px); display: grid; place-items: center; background: #0c1016; color: #9ca8b5; font-size: 12px; text-align: center; }
+.previewStage img { width: 100%; height: 100%; object-fit: contain; min-height: 0; }
+@media (max-width: 900px) { .pipelineSteps { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 1150px) { .rulerPanels { grid-template-columns: 1fr; } }
 @media (max-width: 1050px) { .panels { grid-template-columns: 1fr; } .stage { height: 390px; } }
 @media (max-width: 600px) { .stage { height: 280px; } .toolbar select { min-width: 160px; max-width: 100%; } .table th, .table td { padding: 8px; } }
+@media (max-width: 900px) { .deepGrid { grid-template-columns: 1fr; } }

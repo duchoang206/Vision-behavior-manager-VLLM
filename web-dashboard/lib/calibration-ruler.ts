@@ -7,6 +7,7 @@ export type RulerCalibration = {
   coverage_polygon?: Point2[];
   calibration_updated_at?: number;
   calibrated_at?: number;
+  save_id?: string;
 };
 export type RulerMeasurement = {
   camera_id: string;
@@ -35,5 +36,6 @@ export function zoomImageViewport(view: ImageViewport, size: Point2, factor: num
 export function calibrationMethodLabel(method?: string) {
   if (method === 'auto_robot_fms') return 'Robot + FMS';
   if (method === 'manual_camera_fms_click') return 'Chấm điểm Camera ↔ FMS';
+  if (method === 'deepcalib_camera_fms') return 'DeepCalib → FMS';
   return method || 'Homography';
 }

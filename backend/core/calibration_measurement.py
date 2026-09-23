@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 
-def measure_calibrated_polyline(config: Dict[str, Any], points: List[List[float]]) -> Dict[str, Any]:
+def measure_calibrated_polyline(config: Dict[str, Any], points: List[List[float]], points_space="raw") -> Dict[str, Any]:
     """Project normalized camera points through one calibration snapshot and measure meters."""
     if len(points) < 2:
         raise ValueError("Cần ít nhất 2 điểm để đo khoảng cách.")
@@ -24,11 +24,27 @@ def measure_calibrated_polyline(config: Dict[str, Any], points: List[List[float]
     if matrix.shape != (3, 3) or not np.isfinite(matrix).all() or np.linalg.matrix_rank(matrix) < 3:
         raise ValueError("Camera chưa có ma trận hiệu chuẩn hợp lệ.")
     matrix = matrix / np.linalg.norm(matrix)
-    homogeneous = np.column_stack((source, np.ones(len(source)))) @ matrix.T
+    if points_space not in {"raw", "rectified"}:
+        raise ValueError("Miền tọa độ thước đo không hợp lệ.")
+    if points_space == "rectified":
+        if not config.get("deepcalib_points_rectified"):
+            raise ValueError("Camera chưa lưu hiệu chuẩn DeepCalib.")
+        from deep_calib.geometry import validate_visible_rectified_points
+        validate_visible_rectified_points(source, config.get("intrinsic_profile") or {})
+        source_for_projection = source
+    elif config.get("deepcalib_points_rectified"):
+        try:
+            from deep_calib.geometry import undistort_normalized_points
+            source_for_projection = undistort_normalized_points(source, config.get("intrinsic_profile") or {})
+        except (ImportError, ValueError) as error:
+            raise ValueError(f"Không thể rectified điểm đo bằng DeepCalib: {error}") from error
+    else:
+        source_for_projection = source
+    homogeneous = np.column_stack((source_for_projection, np.ones(len(source_for_projection)))) @ matrix.T
     denominators = homogeneous[:, 2]
     if not np.isfinite(homogeneous).all() or (np.abs(denominators) < 1e-8).any():
         raise ValueError("Có điểm nằm ngoài miền chiếu của hiệu chuẩn.")
-    reference_points = np.asarray(config.get("src_points", []), dtype=np.float64)
+    reference_points = np.asarray(config.get("rectified_src_points") or config.get("src_points", []), dtype=np.float64)
     reference_depth = denominators[0]
     if reference_points.ndim == 2 and reference_points.shape[1:] == (2,) and len(reference_points):
         reference_depth = float(matrix[2] @ np.append(reference_points[0], 1.0))
@@ -39,12 +55,12 @@ def measure_calibrated_polyline(config: Dict[str, Any], points: List[List[float]
     if not np.isfinite(floor_points).all():
         raise ValueError("Không thể đổi điểm ảnh sang tọa độ mặt sàn.")
 
-    coverage = config.get("coverage_polygon")
+    coverage = config.get("rectified_coverage_polygon") if config.get("deepcalib_points_rectified") else config.get("coverage_polygon")
     if not coverage and reference_points.ndim == 2 and len(reference_points) >= 3:
         coverage = cv2.convexHull(reference_points.astype(np.float32)).reshape(-1, 2).tolist()
     if coverage:
         polygon = np.asarray(coverage, dtype=np.float32)
-        inside = [bool(cv2.pointPolygonTest(polygon, (float(point[0]), float(point[1])), True) >= -1e-7) for point in source]
+        inside = [bool(cv2.pointPolygonTest(polygon, (float(point[0]), float(point[1])), True) >= -1e-7) for point in source_for_projection]
     else:
         inside = [None] * len(source)
 
@@ -78,6 +94,7 @@ def measure_calibrated_polyline(config: Dict[str, Any], points: List[List[float]
     return {
         "units": "m",
         "plane": "ground",
+        "points_space": points_space,
         "points": transformed_points,
         "segments": segments,
         "total_distance_m": round(total_distance, 6),

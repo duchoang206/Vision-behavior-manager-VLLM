@@ -1,0 +1,13 @@
+.panel { position: absolute; top: 74px; left: 18px; width: min(290px, calc(100% - 36px)); max-height: calc(100% - 145px); overflow: auto; z-index: 5; padding: 16px; background: var(--bg-card, #101b27); color: var(--text-primary, #e2e8f0); border: 1px solid var(--border, #294151); border-radius: 12px; box-shadow: 0 12px 32px #0004; font-size: 12px; }
+.panel header { display: flex; align-items: center; gap: 8px; color: #38bdf8; }
+.panel header button { margin-left: auto; background: transparent; border: none; padding: 3px; }
+.panel p, .panel small { line-height: 1.5; color: var(--text-muted, #8da6b7); }
+.panel select, .panel input { width: 100%; min-width: 0; background: var(--bg-elevated, #192938); color: inherit; border: 1px solid var(--border, #294151); border-radius: 6px; padding: 7px; margin: 6px 0; }
+.panel form { margin-top: 14px; }
+.panel button { cursor: pointer; border: 1px solid #38bdf855; background: #38bdf820; color: #38bdf8; border-radius: 6px; padding: 8px; }
+.panel button:disabled { opacity: .5; cursor: default; }
+.pair { display: flex; gap: 8px; }
+.panel dl { padding: 10px; border: 1px solid var(--border, #294151); border-radius: 8px; }
+.panel dt { font-size: 10px; color: var(--text-muted, #8da6b7); margin-top: 6px; }
+.panel dd { margin: 3px 0; font-family: monospace; overflow-wrap: anywhere; }
+.panel .warning { color: #f59e0b; }

@@ -5,7 +5,7 @@ from core.identity_utils import identity_global_id
 
 
 def is_person(obj):
-    return str(obj.get("class", "")).lower() in {"person", "human", "worker"}
+    return str(obj.get("category") or obj.get("class", "")).lower() in {"person", "human", "worker", "pedestrian"}
 
 
 def unique_registered(objects):
@@ -67,14 +67,29 @@ class MetadataFusion:
                     if is_person(obj) and obj.get("label") and obj.get("tracking_state") == "tracked"])
             elif source in {"deepstream", "cpu_fallback"}:
                 sources[source] = (now, [dict(obj, label=None, category="person") for obj in objects if is_person(obj)])
+            elif source == "custom_deepstream":
+                from core.model_track_masks import model_identity
+                sources[source] = (now, [dict(obj, label=obj.get("label") if obj.get("identity_verified") is True
+                    and obj.get("identity_source") == "model_label_triplet" and obj.get("model_id")
+                    else model_identity(str(obj.get("class", "")), obj.get("category"))) for obj in objects])
+                sources.pop("identity_template", None)
+                sources.pop("identity_people", None)
             for name in list(sources):
                 source_ttl = self.template_ttl if name == "identity_template" else self.ttl
                 if now - sources[name][0] > source_ttl:
                     del sources[name]
             people = sources.get("deepstream", sources.get("cpu_fallback", (now, [])))[1]
-            people = label_registered_people(people, sources.get("identity_people", (now, []))[1])
-            registered = sources.get("identity_template", (now, []))[1]
-            return [dict(obj) for obj in people + registered]
+            custom = sources.get("custom_deepstream", (now, []))[1]
+            if "custom_deepstream" in sources:
+                people = [obj for obj in custom if is_person(obj)]
+            if "custom_deepstream" not in sources:
+                people = label_registered_people(people, sources.get("identity_people", (now, []))[1])
+            registered = [] if "custom_deepstream" in sources else sources.get("identity_template", (now, []))[1]
+            return [dict(obj) for obj in people + registered + [obj for obj in custom if not is_person(obj)]]
+
+    def remove_source(self, cam_id, source):
+        with self.lock:
+            self.snapshots.get(cam_id, {}).pop(source, None)
 
     def remove_camera(self, cam_id):
         with self.lock:
