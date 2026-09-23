@@ -7,6 +7,9 @@
 - [Bộ xử lý quy tắc an ninh & ROI](architecture/security_rules_engine.md)
 
 ## 📖 Hướng dẫn sử dụng
+- [Active Learning: sửa nhãn, dataset, retrain và kiểm định](guides/active_learning.md)
+- [Workflow Editor và triển khai pipeline](guides/workflow_editor.md)
+- [Upload model TensorRT và Calibration](guides/model_upload_and_calibration.md)
 - [Đăng ký đa góc nhìn, Triplet metric và Calibration](identity-calibration.md)
 - [Đăng ký nhãn vật thể với SAM 2](guides/sam2_target_registration.md)
 - [Bản đồ 3D Digital Twin FMS](guides/fms_3d_digital_twin.md)

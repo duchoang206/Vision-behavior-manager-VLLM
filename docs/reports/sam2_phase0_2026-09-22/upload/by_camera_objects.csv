@@ -1,0 +1,1064 @@
+kind,camera,camera_name,tracker_objects,targets,decoder_objects,metric,n,mean_ms,p50_ms,p95_ms,p99_ms,max_ms
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,copy_wall_ms,10,0.2578,0.2401,0.3758,0.3758,0.3758
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,decoder_cuda_ms,10,48.2835,44.7088,67.2512,67.2512,67.2512
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,encoder_cuda_ms,10,8.1859,7.2595,13.2129,13.2129,13.2129
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,identity_verify_cuda_ms,10,4.0515,4.0183,5.5512,5.5512,5.5512
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,memory_encode_cuda_ms,10,10.5268,10.2458,14.6252,14.6252,14.6252
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,polygon_postprocess_host_ms,10,3.6275,3.4759,5.3072,5.3072,5.3072
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,queue_wait_ms,10,37.8699,27.0831,128.3627,128.3627,128.3627
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,segment_wall_ms,10,82.349,80.657,111.062,111.062,111.062
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t0_t1_ms,10,38.4477,27.6782,128.8981,128.8981,128.8981
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t1_t2_last_ms,10,73.7141,70.1475,97.8431,97.8431,97.8431
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,3,tracker_to_rgba_ms,10,0.1917,0.1806,0.3255,0.3255,0.3255
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,copy_wall_ms,10,0.4665,0.3316,0.902,0.902,0.902
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,decoder_cuda_ms,10,60.2008,57.6798,72.8258,72.8258,72.8258
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,encoder_cuda_ms,10,10.3986,8.8733,16.8521,16.8521,16.8521
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,identity_verify_cuda_ms,10,7.3978,6.1551,13.4087,13.4087,13.4087
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,memory_encode_cuda_ms,10,9.6687,8.8221,14.7689,14.7689,14.7689
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,polygon_postprocess_host_ms,10,3.1612,3.0887,5.1576,5.1576,5.1576
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,queue_wait_ms,10,24.2692,19.3374,67.9747,67.9747,67.9747
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,segment_wall_ms,10,101.4817,103.7356,123.6805,123.6805,123.6805
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t0_t1_ms,10,25.0953,19.9749,69.1547,69.1547,69.1547
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t1_t2_last_ms,10,96.572,95.4524,116.4891,116.4891,116.4891
+frame,06e9e5b9,Cam góc rộng toàn sân,2,5,4,tracker_to_rgba_ms,10,0.2254,0.1975,0.3509,0.3509,0.3509
+frame,06e9e5b9,Cam góc rộng toàn sân,2,,,copy_wall_ms,50,0.6244,0.3972,2.0317,3.7328,3.7328
+frame,06e9e5b9,Cam góc rộng toàn sân,2,,,tracker_to_rgba_ms,67,0.3166,0.2247,0.8424,1.4385,1.4385
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,copy_wall_ms,1,0.2047,0.2047,0.2047,0.2047,0.2047
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,decoder_cuda_ms,1,49.9467,49.9467,49.9467,49.9467,49.9467
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,encoder_cuda_ms,1,13.7313,13.7313,13.7313,13.7313,13.7313
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,identity_verify_cuda_ms,1,4.611,4.611,4.611,4.611,4.611
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,memory_encode_cuda_ms,1,8.4895,8.4895,8.4895,8.4895,8.4895
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,polygon_postprocess_host_ms,1,3.0783,3.0783,3.0783,3.0783,3.0783
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,queue_wait_ms,1,44.6943,44.6943,44.6943,44.6943,44.6943
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,segment_wall_ms,1,89.1148,89.1148,89.1148,89.1148,89.1148
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t0_t1_ms,1,45.1699,45.1699,45.1699,45.1699,45.1699
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t1_t2_last_ms,1,86.567,86.567,86.567,86.567,86.567
+frame,06e9e5b9,Cam góc rộng toàn sân,3,5,4,tracker_to_rgba_ms,1,0.1482,0.1482,0.1482,0.1482,0.1482
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,copy_wall_ms,106,0.4279,0.2687,0.9549,4.0004,4.0239
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,decoder_cuda_ms,106,44.6064,43.254,68.788,73.3307,81.4167
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,encoder_cuda_ms,106,8.3207,7.594,13.8036,16.7608,17.3323
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,identity_verify_cuda_ms,106,3.8822,3.494,6.1914,9.2576,12.6468
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,memory_encode_cuda_ms,106,9.1464,8.4201,14.1037,17.4133,18.3021
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,polygon_postprocess_host_ms,106,2.8222,2.5455,4.8307,6.0511,14.9749
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,queue_wait_ms,106,27.869,22.5755,67.1539,126.0235,199.7535
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,segment_wall_ms,106,75.7264,73.2936,109.7376,124.1361,127.1327
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t0_t1_ms,106,28.6673,23.4901,67.7722,126.6025,200.2932
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t1_t2_last_ms,106,68.6721,65.8129,97.9011,113.4904,116.3547
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,3,tracker_to_rgba_ms,106,0.2183,0.1879,0.437,0.5278,0.7294
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,copy_wall_ms,94,0.3345,0.2596,0.7727,1.5386,1.5386
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,decoder_cuda_ms,94,55.7292,53.2342,78.4991,106.268,106.268
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,encoder_cuda_ms,94,7.8537,7.36,10.6633,13.2007,13.2007
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,identity_verify_cuda_ms,94,5.3995,5.1926,8.5918,10.4672,10.4672
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,memory_encode_cuda_ms,94,9.2282,8.4409,14.4874,20.609,20.609
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,polygon_postprocess_host_ms,94,3.125,2.806,5.6124,7.6611,7.6611
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,queue_wait_ms,94,28.0074,19.74,92.0897,143.9314,143.9314
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,segment_wall_ms,94,91.0708,90.0958,125.4159,164.1826,164.1826
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t0_t1_ms,94,28.727,20.2628,92.6973,144.8634,144.8634
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t1_t2_last_ms,94,87.7998,87.9752,122.5088,157.3281,157.3281
+frame,06e9e5b9,Cam góc rộng toàn sân,3,6,4,tracker_to_rgba_ms,94,0.2366,0.186,0.5775,0.946,0.946
+frame,06e9e5b9,Cam góc rộng toàn sân,3,,,copy_wall_ms,508,0.373,0.2894,0.8975,1.4329,3.0918
+frame,06e9e5b9,Cam góc rộng toàn sân,3,,,tracker_to_rgba_ms,642,0.2548,0.1945,0.6256,1.2011,1.6492
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,copy_wall_ms,2,0.2052,0.1966,0.2139,0.2139,0.2139
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,decoder_cuda_ms,2,46.4179,38.0628,54.7731,54.7731,54.7731
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,encoder_cuda_ms,2,6.9816,6.4249,7.5383,7.5383,7.5383
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,identity_verify_cuda_ms,2,2.9347,2.4129,3.4564,3.4564,3.4564
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,memory_encode_cuda_ms,2,10.452,9.8107,11.0932,11.0932,11.0932
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,polygon_postprocess_host_ms,2,2.0817,2.0725,2.091,2.091,2.091
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,queue_wait_ms,2,30.6935,14.1284,47.2585,47.2585,47.2585
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,segment_wall_ms,2,74.972,64.7283,85.2157,85.2157,85.2157
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t0_t1_ms,2,31.1326,14.5901,47.6751,47.6751,47.6751
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t1_t2_last_ms,2,69.909,60.0471,79.7709,79.7709,79.7709
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,3,tracker_to_rgba_ms,2,0.1221,0.1159,0.1283,0.1283,0.1283
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,copy_wall_ms,7,0.5398,0.5089,1.0815,1.0815,1.0815
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,decoder_cuda_ms,7,52.2046,52.5789,59.7552,59.7552,59.7552
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,encoder_cuda_ms,7,8.2172,6.5749,18.5516,18.5516,18.5516
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,identity_verify_cuda_ms,7,5.9922,6.224,10.6129,10.6129,10.6129
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,memory_encode_cuda_ms,7,9.0383,8.9979,11.71,11.71,11.71
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,polygon_postprocess_host_ms,7,2.9034,2.9495,5.0249,5.0249,5.0249
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,queue_wait_ms,7,28.9294,25.8137,56.34,56.34,56.34
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,segment_wall_ms,7,88.0048,85.9292,108.8799,108.8799,108.8799
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t0_t1_ms,7,29.9527,27.0149,57.5438,57.5438,57.5438
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t1_t2_last_ms,7,84.3689,82.9,106.5084,106.5084,106.5084
+frame,06e9e5b9,Cam góc rộng toàn sân,4,6,4,tracker_to_rgba_ms,7,0.3085,0.3184,0.5348,0.5348,0.5348
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,copy_wall_ms,273,0.3386,0.2683,0.7645,1.3702,3.3171
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,decoder_cuda_ms,273,43.7245,41.8647,64.4634,71.5052,78.29
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,encoder_cuda_ms,273,8.228,7.6082,11.7902,15.9723,16.3484
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,identity_verify_cuda_ms,273,3.9141,3.5664,6.9588,9.4941,12.3175
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,memory_encode_cuda_ms,273,8.9754,8.4261,14.3482,16.9624,18.1986
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,polygon_postprocess_host_ms,273,2.8108,2.5849,5.1245,5.7011,7.2205
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,queue_wait_ms,273,31.2059,24.999,101.038,145.7412,149.0463
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,segment_wall_ms,273,74.9126,72.2335,103.751,114.6956,203.4713
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t0_t1_ms,273,31.9468,25.8823,101.7072,146.356,150.3329
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t1_t2_last_ms,273,67.8302,64.9106,96.8994,108.0809,191.3547
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,3,tracker_to_rgba_ms,273,0.2335,0.1881,0.5297,1.1327,1.3706
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,copy_wall_ms,269,0.3615,0.2781,0.8183,2.1396,3.0643
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,decoder_cuda_ms,269,55.5182,53.5843,78.3534,89.9991,95.7769
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,encoder_cuda_ms,269,8.6294,8.0987,12.8125,15.4761,16.1282
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,identity_verify_cuda_ms,269,5.695,5.317,9.5355,12.1243,22.2224
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,memory_encode_cuda_ms,269,9.2734,8.5536,14.9891,18.7978,19.3251
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,polygon_postprocess_host_ms,269,3.0097,2.716,4.9238,6.172,29.8157
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,queue_wait_ms,269,24.0459,18.3737,59.4529,128.7935,226.5867
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,segment_wall_ms,269,91.662,88.4017,127.7851,147.5464,166.0832
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t0_t1_ms,269,24.8304,18.8292,60.2948,132.0471,227.2594
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t1_t2_last_ms,269,88.2868,84.8903,124.0252,144.5372,160.56
+frame,06e9e5b9,Cam góc rộng toàn sân,4,7,4,tracker_to_rgba_ms,269,0.2535,0.1844,0.6032,1.6222,2.6207
+frame,06e9e5b9,Cam góc rộng toàn sân,4,,,copy_wall_ms,1339,0.3708,0.2832,0.9134,1.8786,4.6978
+frame,06e9e5b9,Cam góc rộng toàn sân,4,,,tracker_to_rgba_ms,1730,0.2594,0.1931,0.6164,1.1464,4.9597
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,copy_wall_ms,67,0.3694,0.3092,0.6753,1.2942,1.2942
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,decoder_cuda_ms,67,14.3093,13.9437,22.5871,24.5063,24.5063
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,encoder_cuda_ms,67,8.1512,7.8646,11.4078,12.7208,12.7208
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,queue_wait_ms,67,22.378,18.4553,48.7869,118.5914,118.5914
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,segment_wall_ms,67,23.4466,22.9917,32.6201,39.9799,39.9799
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,t0_t1_ms,67,23.1059,19.9035,49.5464,119.0971,119.0971
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,t1_t2_last_ms,67,23.1335,22.558,32.3492,39.6707,39.6707
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,tracker_to_rgba_ms,67,0.2827,0.2409,0.58,1.054,1.054
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,,,copy_wall_ms,176,0.4673,0.3373,0.9682,3.2593,6.1197
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,0,,,tracker_to_rgba_ms,1836,0.2978,0.2354,0.6739,1.1312,2.9317
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,copy_wall_ms,127,0.4307,0.3214,1.0533,1.8332,2.2466
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,encoder_cuda_ms,127,8.4886,8.0926,12.6303,14.5694,16.4049
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,queue_wait_ms,127,27.702,24.6441,73.1525,117.998,139.3883
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,segment_wall_ms,127,6.8241,5.8524,12.9337,15.0993,16.3133
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,t0_t1_ms,127,28.5502,25.7807,74.1405,118.7861,139.9152
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,0,tracker_to_rgba_ms,127,0.2891,0.2253,0.5797,1.0321,1.2687
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,copy_wall_ms,138,0.4263,0.3374,0.8994,1.552,2.3996
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,decoder_cuda_ms,138,10.9208,10.1136,17.9491,20.5813,25.6084
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,encoder_cuda_ms,138,9.0999,8.6866,14.072,16.086,19.37
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,identity_verify_cuda_ms,137,1.3934,1.1505,3.3084,4.262,5.905
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,queue_wait_ms,138,30.0299,22.5733,87.193,191.6495,239.6725
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,segment_wall_ms,138,24.3159,23.449,35.8705,37.9094,41.1483
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,t0_t1_ms,138,30.928,23.3103,88.4089,192.9346,240.6164
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,t1_t2_last_ms,138,20.8172,19.8515,31.5273,32.4097,37.1183
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,tracker_to_rgba_ms,138,0.34,0.2501,0.949,1.1556,3.0317
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,copy_wall_ms,21,0.3549,0.3254,0.5873,0.6551,0.6551
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,decoder_cuda_ms,21,16.9103,16.0001,25.3513,29.4399,29.4399
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,encoder_cuda_ms,21,8.4232,8.1524,12.1021,16.2613,16.2613
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,queue_wait_ms,21,18.0589,9.47,53.6759,60.6055,60.6055
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,segment_wall_ms,21,26.3219,24.6275,35.1727,46.6949,46.6949
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,t0_t1_ms,21,18.8931,10.0819,54.2184,61.6705,61.6705
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,t1_t2_last_ms,21,26.0262,24.4704,34.7652,46.3201,46.3201
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,tracker_to_rgba_ms,21,0.3489,0.2487,0.8176,0.8419,0.8419
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,copy_wall_ms,31,0.5163,0.3778,1.1269,1.1593,1.1593
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,decoder_cuda_ms,31,26.1507,24.2497,40.6211,43.4482,43.4482
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,encoder_cuda_ms,31,8.108,8.2474,11.5917,12.26,12.26
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,identity_verify_cuda_ms,31,1.3004,1.0331,3.2612,3.7454,3.7454
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,queue_wait_ms,31,22.2363,22.4604,54.3375,58.5694,58.5694
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,segment_wall_ms,31,39.3401,38.1833,60.4026,61.0184,61.0184
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,t0_t1_ms,31,23.2619,23.4846,54.9464,60.0313,60.0313
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,t1_t2_last_ms,31,35.9737,34.5803,55.6548,55.7207,55.7207
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,tracker_to_rgba_ms,31,0.374,0.2794,0.841,1.0176,1.0176
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,,,copy_wall_ms,960,0.4698,0.3511,1.1173,2.3261,5.0076
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,1,,,tracker_to_rgba_ms,1139,0.321,0.2536,0.7231,1.1862,2.5977
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,copy_wall_ms,1,0.2805,0.2805,0.2805,0.2805,0.2805
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,encoder_cuda_ms,1,11.0094,11.0094,11.0094,11.0094,11.0094
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,queue_wait_ms,1,18.8274,18.8274,18.8274,18.8274,18.8274
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,segment_wall_ms,1,11.5886,11.5886,11.5886,11.5886,11.5886
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,t0_t1_ms,1,19.4833,19.4833,19.4833,19.4833,19.4833
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,0,tracker_to_rgba_ms,1,0.2448,0.2448,0.2448,0.2448,0.2448
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,copy_wall_ms,4,0.7289,0.3673,1.7418,1.7418,1.7418
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,decoder_cuda_ms,4,12.2878,9.0831,19.7413,19.7413,19.7413
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,encoder_cuda_ms,4,10.4712,9.6921,12.0343,12.0343,12.0343
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,identity_verify_cuda_ms,4,2.1447,2.4604,2.8616,2.8616,2.8616
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,queue_wait_ms,4,28.9671,24.2797,48.2709,48.2709,48.2709
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,segment_wall_ms,4,27.8151,24.0603,35.3443,35.3443,35.3443
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,t0_t1_ms,4,30.2576,26.5698,49.6313,49.6313,49.6313
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,t1_t2_last_ms,4,23.5462,21.5262,29.964,29.964,29.964
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,tracker_to_rgba_ms,4,0.3685,0.2301,0.6736,0.6736,0.6736
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,,,copy_wall_ms,13,0.5363,0.423,1.6595,1.6595,1.6595
+frame,1ac2ffac,Cam Dahua Ch2 Fixed,2,,,tracker_to_rgba_ms,15,0.2964,0.252,0.8356,0.8356,0.8356
+frame,b1269e28,Cam 4,4,7,3,copy_wall_ms,31,0.466,0.3382,1.1429,2.0846,2.0846
+frame,b1269e28,Cam 4,4,7,3,decoder_cuda_ms,31,49.1323,46.5068,64.4333,73.845,73.845
+frame,b1269e28,Cam 4,4,7,3,encoder_cuda_ms,31,9.5647,8.8512,12.6027,24.8669,24.8669
+frame,b1269e28,Cam 4,4,7,3,identity_verify_cuda_ms,31,4.9586,4.39,7.8103,16.2331,16.2331
+frame,b1269e28,Cam 4,4,7,3,memory_encode_cuda_ms,31,10.4906,9.4157,15.8822,16.1039,16.1039
+frame,b1269e28,Cam 4,4,7,3,polygon_postprocess_host_ms,31,5.0365,4.6391,8.9704,18.2197,18.2197
+frame,b1269e28,Cam 4,4,7,3,queue_wait_ms,31,38.027,33.2429,97.835,142.4371,142.4371
+frame,b1269e28,Cam 4,4,7,3,segment_wall_ms,31,86.5944,83.1868,118.8056,139.2398,139.2398
+frame,b1269e28,Cam 4,4,7,3,t0_t1_ms,31,39.0445,33.8243,98.5329,143.0993,143.0993
+frame,b1269e28,Cam 4,4,7,3,t1_t2_last_ms,31,78.3291,73.6294,106.6125,127.2295,127.2295
+frame,b1269e28,Cam 4,4,7,3,tracker_to_rgba_ms,31,0.3574,0.2501,0.6214,2.7003,2.7003
+frame,b1269e28,Cam 4,4,7,5,copy_wall_ms,27,0.587,0.4554,1.2681,2.7643,2.7643
+frame,b1269e28,Cam 4,4,7,5,decoder_cuda_ms,27,68.8917,66.3096,91.2033,91.6487,91.6487
+frame,b1269e28,Cam 4,4,7,5,encoder_cuda_ms,27,9.1843,8.2793,14.7321,18.9908,18.9908
+frame,b1269e28,Cam 4,4,7,5,identity_verify_cuda_ms,27,9.202,8.3003,18.2061,24.5252,24.5252
+frame,b1269e28,Cam 4,4,7,5,memory_encode_cuda_ms,27,9.4054,8.5751,15.3292,17.3384,17.3384
+frame,b1269e28,Cam 4,4,7,5,polygon_postprocess_host_ms,27,5.0088,4.5488,9.2666,11.419,11.419
+frame,b1269e28,Cam 4,4,7,5,queue_wait_ms,27,23.9664,19.2531,57.4965,71.7247,71.7247
+frame,b1269e28,Cam 4,4,7,5,segment_wall_ms,27,115.8564,113.7586,158.6187,164.0666,164.0666
+frame,b1269e28,Cam 4,4,7,5,t0_t1_ms,27,25.1451,20.2645,58.4025,72.995,72.995
+frame,b1269e28,Cam 4,4,7,5,t1_t2_last_ms,27,112.0459,109.9464,154.0725,155.2754,155.2754
+frame,b1269e28,Cam 4,4,7,5,tracker_to_rgba_ms,27,0.4043,0.2706,0.8672,2.8456,2.8456
+frame,b1269e28,Cam 4,4,8,4,copy_wall_ms,409,0.382,0.3118,0.8465,1.4166,4.9004
+frame,b1269e28,Cam 4,4,8,4,decoder_cuda_ms,409,58.3584,56.178,81.1639,96.8175,113.5415
+frame,b1269e28,Cam 4,4,8,4,encoder_cuda_ms,409,8.4923,8.1868,12.2319,14.5985,17.4694
+frame,b1269e28,Cam 4,4,8,4,identity_verify_cuda_ms,409,5.0156,4.6784,7.7971,8.7414,10.5352
+frame,b1269e28,Cam 4,4,8,4,memory_encode_cuda_ms,409,12.1043,11.4441,18.8708,23.5678,26.0409
+frame,b1269e28,Cam 4,4,8,4,polygon_postprocess_host_ms,409,4.9402,4.1793,6.8807,9.4388,202.0314
+frame,b1269e28,Cam 4,4,8,4,queue_wait_ms,409,33.9446,29.734,77.6858,119.7599,191.3923
+frame,b1269e28,Cam 4,4,8,4,segment_wall_ms,409,97.3322,94.0202,132.2991,149.8952,300.3811
+frame,b1269e28,Cam 4,4,8,4,t0_t1_ms,409,34.807,30.669,78.7425,120.5678,192.3705
+frame,b1269e28,Cam 4,4,8,4,t1_t2_last_ms,409,90.095,86.719,122.4108,142.767,287.3398
+frame,b1269e28,Cam 4,4,8,4,tracker_to_rgba_ms,409,0.3016,0.241,0.685,1.2179,1.7684
+frame,b1269e28,Cam 4,4,8,6,copy_wall_ms,333,0.3739,0.3117,0.7868,1.3366,2.4365
+frame,b1269e28,Cam 4,4,8,6,decoder_cuda_ms,333,78.0278,75.5776,107.707,122.5303,179.1586
+frame,b1269e28,Cam 4,4,8,6,encoder_cuda_ms,333,8.6973,8.0701,13.4386,17.1483,19.0664
+frame,b1269e28,Cam 4,4,8,6,identity_verify_cuda_ms,333,8.0956,7.724,12.5313,15.7666,17.6058
+frame,b1269e28,Cam 4,4,8,6,memory_encode_cuda_ms,333,12.282,11.9028,18.9011,21.8901,28.5981
+frame,b1269e28,Cam 4,4,8,6,polygon_postprocess_host_ms,333,4.9043,4.2679,7.1289,8.154,117.5567
+frame,b1269e28,Cam 4,4,8,6,queue_wait_ms,333,27.0789,20.7747,70.8027,120.072,132.5827
+frame,b1269e28,Cam 4,4,8,6,segment_wall_ms,333,125.6526,121.5881,170.8243,180.866,240.5004
+frame,b1269e28,Cam 4,4,8,6,t0_t1_ms,333,27.94,21.2987,71.8461,121.7255,133.4553
+frame,b1269e28,Cam 4,4,8,6,t1_t2_last_ms,333,122.2853,118.8872,165.2002,177.0368,237.8362
+frame,b1269e28,Cam 4,4,8,6,tracker_to_rgba_ms,333,0.3,0.247,0.6156,1.4287,1.702
+frame,b1269e28,Cam 4,4,8,,copy_wall_ms,1,0.5163,0.5163,0.5163,0.5163,0.5163
+frame,b1269e28,Cam 4,4,8,,decoder_cuda_ms,1,12.5535,12.5535,12.5535,12.5535,12.5535
+frame,b1269e28,Cam 4,4,8,,encoder_cuda_ms,1,10.3305,10.3305,10.3305,10.3305,10.3305
+frame,b1269e28,Cam 4,4,8,,identity_verify_cuda_ms,1,1.2803,1.2803,1.2803,1.2803,1.2803
+frame,b1269e28,Cam 4,4,8,,memory_encode_cuda_ms,1,4.9071,4.9071,4.9071,4.9071,4.9071
+frame,b1269e28,Cam 4,4,8,,polygon_postprocess_host_ms,1,1.5787,1.5787,1.5787,1.5787,1.5787
+frame,b1269e28,Cam 4,4,8,,queue_wait_ms,1,11.9137,11.9137,11.9137,11.9137,11.9137
+frame,b1269e28,Cam 4,4,8,,t0_t1_ms,1,13.4697,13.4697,13.4697,13.4697,13.4697
+frame,b1269e28,Cam 4,4,8,,t1_t2_last_ms,1,23.2823,23.2823,23.2823,23.2823,23.2823
+frame,b1269e28,Cam 4,4,8,,tracker_to_rgba_ms,1,0.7852,0.7852,0.7852,0.7852,0.7852
+frame,b1269e28,Cam 4,4,,,copy_wall_ms,1326,0.4189,0.3323,0.9485,1.9706,4.1713
+frame,b1269e28,Cam 4,4,,,tracker_to_rgba_ms,1587,0.3199,0.2485,0.7099,1.781,4.3804
+frame,b1269e28,Cam 4,5,8,4,copy_wall_ms,5,0.3585,0.3342,0.5478,0.5478,0.5478
+frame,b1269e28,Cam 4,5,8,4,decoder_cuda_ms,5,56.7543,60.785,73.4314,73.4314,73.4314
+frame,b1269e28,Cam 4,5,8,4,encoder_cuda_ms,5,8.6998,8.469,12.9926,12.9926,12.9926
+frame,b1269e28,Cam 4,5,8,4,identity_verify_cuda_ms,5,6.1021,5.1001,8.0438,8.0438,8.0438
+frame,b1269e28,Cam 4,5,8,4,memory_encode_cuda_ms,5,14.5351,12.4023,23.6062,23.6062,23.6062
+frame,b1269e28,Cam 4,5,8,4,polygon_postprocess_host_ms,5,5.7089,6.1396,7.608,7.608,7.608
+frame,b1269e28,Cam 4,5,8,4,queue_wait_ms,5,32.2874,29.234,48.7416,48.7416,48.7416
+frame,b1269e28,Cam 4,5,8,4,segment_wall_ms,5,101.7813,106.4727,130.2824,130.2824,130.2824
+frame,b1269e28,Cam 4,5,8,4,t0_t1_ms,5,33.0953,29.9177,49.3115,49.3115,49.3115
+frame,b1269e28,Cam 4,5,8,4,t1_t2_last_ms,5,95.4509,99.4467,123.0178,123.0178,123.0178
+frame,b1269e28,Cam 4,5,8,4,tracker_to_rgba_ms,5,0.257,0.2251,0.4017,0.4017,0.4017
+frame,b1269e28,Cam 4,5,8,6,copy_wall_ms,4,0.4066,0.3038,0.6496,0.6496,0.6496
+frame,b1269e28,Cam 4,5,8,6,decoder_cuda_ms,4,79.1504,76.614,87.8034,87.8034,87.8034
+frame,b1269e28,Cam 4,5,8,6,encoder_cuda_ms,4,9.6206,7.3693,14.3091,14.3091,14.3091
+frame,b1269e28,Cam 4,5,8,6,identity_verify_cuda_ms,4,10.2707,9.3063,11.4351,11.4351,11.4351
+frame,b1269e28,Cam 4,5,8,6,memory_encode_cuda_ms,4,11.2984,9.684,15.766,15.766,15.766
+frame,b1269e28,Cam 4,5,8,6,polygon_postprocess_host_ms,4,5.6123,5.5776,6.9067,6.9067,6.9067
+frame,b1269e28,Cam 4,5,8,6,queue_wait_ms,4,26.7975,6.4974,80.9203,80.9203,80.9203
+frame,b1269e28,Cam 4,5,8,6,segment_wall_ms,4,131.3878,118.4396,157.4516,157.4516,157.4516
+frame,b1269e28,Cam 4,5,8,6,t0_t1_ms,4,27.6951,7.2305,82.076,82.076,82.076
+frame,b1269e28,Cam 4,5,8,6,t1_t2_last_ms,4,126.251,110.2627,150.5679,150.5679,150.5679
+frame,b1269e28,Cam 4,5,8,6,tracker_to_rgba_ms,4,0.2525,0.2486,0.2833,0.2833,0.2833
+frame,b1269e28,Cam 4,5,9,4,copy_wall_ms,26,0.3901,0.2835,0.9619,1.7186,1.7186
+frame,b1269e28,Cam 4,5,9,4,decoder_cuda_ms,26,57.6026,51.5843,82.6408,83.7948,83.7948
+frame,b1269e28,Cam 4,5,9,4,encoder_cuda_ms,26,8.3266,8.0745,11.7077,13.4428,13.4428
+frame,b1269e28,Cam 4,5,9,4,identity_verify_cuda_ms,26,5.4933,5.0222,8.5545,9.9536,9.9536
+frame,b1269e28,Cam 4,5,9,4,memory_encode_cuda_ms,26,11.7362,11.0515,16.4855,22.4597,22.4597
+frame,b1269e28,Cam 4,5,9,4,polygon_postprocess_host_ms,26,4.8879,4.6907,6.397,7.7071,7.7071
+frame,b1269e28,Cam 4,5,9,4,queue_wait_ms,26,30.5672,25.2384,73.4424,81.0526,81.0526
+frame,b1269e28,Cam 4,5,9,4,segment_wall_ms,26,97.3549,91.44,135.7693,141.1578,141.1578
+frame,b1269e28,Cam 4,5,9,4,t0_t1_ms,26,31.4321,26.3521,74.1099,82.183,82.183
+frame,b1269e28,Cam 4,5,9,4,t1_t2_last_ms,26,90.1659,86.0724,127.6959,135.8845,135.8845
+frame,b1269e28,Cam 4,5,9,4,tracker_to_rgba_ms,26,0.2778,0.2329,0.5409,0.6662,0.6662
+frame,b1269e28,Cam 4,5,9,5,copy_wall_ms,13,0.4987,0.4222,1.0883,1.0883,1.0883
+frame,b1269e28,Cam 4,5,9,5,decoder_cuda_ms,13,80.8995,80.7698,112.4165,112.4165,112.4165
+frame,b1269e28,Cam 4,5,9,5,encoder_cuda_ms,13,7.9757,7.3268,14.692,14.692,14.692
+frame,b1269e28,Cam 4,5,9,5,identity_verify_cuda_ms,13,8.7785,8.8053,14.2277,14.2277,14.2277
+frame,b1269e28,Cam 4,5,9,5,memory_encode_cuda_ms,13,14.7349,15.4132,20.6538,20.6538,20.6538
+frame,b1269e28,Cam 4,5,9,5,polygon_postprocess_host_ms,13,5.6514,5.4421,7.4477,7.4477,7.4477
+frame,b1269e28,Cam 4,5,9,5,queue_wait_ms,13,35.5493,39.4625,77.135,77.135,77.135
+frame,b1269e28,Cam 4,5,9,5,segment_wall_ms,13,130.4657,127.203,174.8376,174.8376,174.8376
+frame,b1269e28,Cam 4,5,9,5,t0_t1_ms,13,36.752,40.1809,78.2884,78.2884,78.2884
+frame,b1269e28,Cam 4,5,9,5,t1_t2_last_ms,13,125.4434,122.4439,171.5276,171.5276,171.5276
+frame,b1269e28,Cam 4,5,9,5,tracker_to_rgba_ms,13,0.4672,0.3392,1.4407,1.4407,1.4407
+frame,b1269e28,Cam 4,5,9,6,copy_wall_ms,19,0.4708,0.4327,0.9249,0.9249,0.9249
+frame,b1269e28,Cam 4,5,9,6,decoder_cuda_ms,19,87.3499,86.0775,124.499,124.499,124.499
+frame,b1269e28,Cam 4,5,9,6,encoder_cuda_ms,19,8.7397,8.478,12.0828,12.0828,12.0828
+frame,b1269e28,Cam 4,5,9,6,identity_verify_cuda_ms,19,8.4766,8.3685,15.6372,15.6372,15.6372
+frame,b1269e28,Cam 4,5,9,6,memory_encode_cuda_ms,19,13.7331,12.7371,23.7115,23.7115,23.7115
+frame,b1269e28,Cam 4,5,9,6,polygon_postprocess_host_ms,19,5.5434,5.3268,9.1786,9.1786,9.1786
+frame,b1269e28,Cam 4,5,9,6,queue_wait_ms,19,27.7122,21.2132,121.2085,121.2085,121.2085
+frame,b1269e28,Cam 4,5,9,6,segment_wall_ms,19,139.179,135.9822,192.4935,192.4935,192.4935
+frame,b1269e28,Cam 4,5,9,6,t0_t1_ms,19,28.7335,22.2136,121.889,121.889,121.889
+frame,b1269e28,Cam 4,5,9,6,t1_t2_last_ms,19,135.7157,131.8619,188.1508,188.1508,188.1508
+frame,b1269e28,Cam 4,5,9,6,tracker_to_rgba_ms,19,0.3167,0.2844,0.8395,0.8395,0.8395
+frame,b1269e28,Cam 4,5,9,7,copy_wall_ms,29,0.4208,0.3111,0.9574,1.7924,1.7924
+frame,b1269e28,Cam 4,5,9,7,decoder_cuda_ms,29,92.327,94.5774,123.083,124.933,124.933
+frame,b1269e28,Cam 4,5,9,7,encoder_cuda_ms,29,8.9822,8.0332,14.2278,15.5322,15.5322
+frame,b1269e28,Cam 4,5,9,7,identity_verify_cuda_ms,29,9.7096,9.4701,14.2514,20.4838,20.4838
+frame,b1269e28,Cam 4,5,9,7,memory_encode_cuda_ms,29,13.4606,11.6691,23.7585,24.4939,24.4939
+frame,b1269e28,Cam 4,5,9,7,polygon_postprocess_host_ms,29,5.3839,4.4038,8.7635,12.2591,12.2591
+frame,b1269e28,Cam 4,5,9,7,queue_wait_ms,29,24.9657,13.3937,73.0696,112.5406,112.5406
+frame,b1269e28,Cam 4,5,9,7,segment_wall_ms,29,147.4308,147.2338,189.5561,212.278,212.278
+frame,b1269e28,Cam 4,5,9,7,t0_t1_ms,29,25.9234,13.9285,74.2197,115.3438,115.3438
+frame,b1269e28,Cam 4,5,9,7,t1_t2_last_ms,29,143.8261,142.5451,182.7665,208.5257,208.5257
+frame,b1269e28,Cam 4,5,9,7,tracker_to_rgba_ms,29,0.3358,0.2834,0.6994,0.7667,0.7667
+frame,b1269e28,Cam 4,5,,,copy_wall_ms,187,0.4126,0.3361,0.9834,2.501,2.5483
+frame,b1269e28,Cam 4,5,,,tracker_to_rgba_ms,220,0.3216,0.25,0.6616,1.1871,2.1373
+frame,c7e22c1f,Cam mới,1,1,1,copy_wall_ms,31,0.3612,0.283,0.7635,1.5272,1.5272
+frame,c7e22c1f,Cam mới,1,1,1,decoder_cuda_ms,31,16.1706,16.1668,24.5691,26.6946,26.6946
+frame,c7e22c1f,Cam mới,1,1,1,encoder_cuda_ms,31,8.5868,8.1835,11.5157,16.3089,16.3089
+frame,c7e22c1f,Cam mới,1,1,1,identity_verify_cuda_ms,31,1.6677,1.3808,4.2413,4.5251,4.5251
+frame,c7e22c1f,Cam mới,1,1,1,memory_encode_cuda_ms,31,3.0846,2.7493,7.1469,7.8882,7.8882
+frame,c7e22c1f,Cam mới,1,1,1,polygon_postprocess_host_ms,31,1.1304,0.9627,2.4771,2.5281,2.5281
+frame,c7e22c1f,Cam mới,1,1,1,queue_wait_ms,31,28.0254,26.3659,67.8722,71.5917,71.5917
+frame,c7e22c1f,Cam mới,1,1,1,segment_wall_ms,31,33.9284,33.2619,45.8053,46.8628,46.8628
+frame,c7e22c1f,Cam mới,1,1,1,t0_t1_ms,31,28.8054,27.174,68.9226,72.1291,72.1291
+frame,c7e22c1f,Cam mới,1,1,1,t1_t2_last_ms,31,25.7194,24.3861,36.9303,37.9116,37.9116
+frame,c7e22c1f,Cam mới,1,1,1,tracker_to_rgba_ms,31,0.295,0.2386,0.6868,0.7328,0.7328
+frame,c7e22c1f,Cam mới,1,,,copy_wall_ms,98,0.4848,0.3409,1.2087,5.0989,5.0989
+frame,c7e22c1f,Cam mới,1,,,tracker_to_rgba_ms,123,0.2961,0.2338,0.6564,1.0539,2.0373
+frame,c7e22c1f,Cam mới,2,1,1,copy_wall_ms,4,0.2681,0.2729,0.323,0.323,0.323
+frame,c7e22c1f,Cam mới,2,1,1,decoder_cuda_ms,4,14.8887,10.8959,21.1885,21.1885,21.1885
+frame,c7e22c1f,Cam mới,2,1,1,encoder_cuda_ms,4,6.7681,5.778,9.5172,9.5172,9.5172
+frame,c7e22c1f,Cam mới,2,1,1,identity_verify_cuda_ms,4,1.6962,1.426,2.3141,2.3141,2.3141
+frame,c7e22c1f,Cam mới,2,1,1,memory_encode_cuda_ms,4,3.8396,3.4541,5.5088,5.5088,5.5088
+frame,c7e22c1f,Cam mới,2,1,1,polygon_postprocess_host_ms,4,1.147,1.0205,1.3888,1.3888,1.3888
+frame,c7e22c1f,Cam mới,2,1,1,queue_wait_ms,4,10.582,9.9501,16.1413,16.1413,16.1413
+frame,c7e22c1f,Cam mới,2,1,1,segment_wall_ms,4,31.5028,27.5202,41.7355,41.7355,41.7355
+frame,c7e22c1f,Cam mới,2,1,1,t0_t1_ms,4,11.3099,10.5608,17.0987,17.0987,17.0987
+frame,c7e22c1f,Cam mới,2,1,1,t1_t2_last_ms,4,22.3398,17.0101,31.3816,31.3816,31.3816
+frame,c7e22c1f,Cam mới,2,1,1,tracker_to_rgba_ms,4,0.3084,0.1994,0.6594,0.6594,0.6594
+frame,c7e22c1f,Cam mới,2,2,1,copy_wall_ms,114,0.3887,0.3032,0.8537,1.3392,1.6585
+frame,c7e22c1f,Cam mới,2,2,1,decoder_cuda_ms,114,14.8788,13.8546,23.0771,28.3252,28.6276
+frame,c7e22c1f,Cam mới,2,2,1,encoder_cuda_ms,114,8.2183,7.683,13.2438,13.8826,14.1446
+frame,c7e22c1f,Cam mới,2,2,1,identity_verify_cuda_ms,114,1.372,1.1903,2.8107,4.6296,6.2757
+frame,c7e22c1f,Cam mới,2,2,1,memory_encode_cuda_ms,114,3.2233,2.5921,6.2772,7.7496,9.7223
+frame,c7e22c1f,Cam mới,2,2,1,polygon_postprocess_host_ms,114,2.0327,1.0722,2.2164,3.3465,99.117
+frame,c7e22c1f,Cam mới,2,2,1,queue_wait_ms,114,25.933,20.7126,66.3418,116.0168,116.7668
+frame,c7e22c1f,Cam mới,2,2,1,segment_wall_ms,114,32.609,30.5291,45.7987,48.8468,136.2286
+frame,c7e22c1f,Cam mới,2,2,1,t0_t1_ms,114,26.7194,21.2051,66.8578,116.9425,117.3633
+frame,c7e22c1f,Cam mới,2,2,1,t1_t2_last_ms,114,24.0444,22.3994,35.4722,39.5564,39.9686
+frame,c7e22c1f,Cam mới,2,2,1,tracker_to_rgba_ms,114,0.2566,0.2025,0.4694,1.1939,1.8433
+frame,c7e22c1f,Cam mới,2,2,2,copy_wall_ms,168,0.369,0.3054,0.7894,1.6176,1.6743
+frame,c7e22c1f,Cam mới,2,2,2,decoder_cuda_ms,168,28.0073,26.0223,42.5751,45.7768,47.8112
+frame,c7e22c1f,Cam mới,2,2,2,encoder_cuda_ms,168,8.4488,7.9686,12.4124,14.4501,15.3971
+frame,c7e22c1f,Cam mới,2,2,2,identity_verify_cuda_ms,168,2.9578,2.681,5.1498,6.2625,6.4557
+frame,c7e22c1f,Cam mới,2,2,2,memory_encode_cuda_ms,168,4.7244,4.2082,9.7187,15.966,17.1169
+frame,c7e22c1f,Cam mới,2,2,2,polygon_postprocess_host_ms,168,1.6602,1.5053,3.2627,4.452,5.6842
+frame,c7e22c1f,Cam mới,2,2,2,queue_wait_ms,168,25.6171,23.8597,58.5717,99.7718,112.3297
+frame,c7e22c1f,Cam mới,2,2,2,segment_wall_ms,168,50.8006,48.7562,72.6343,77.6136,79.0846
+frame,c7e22c1f,Cam mới,2,2,2,t0_t1_ms,168,26.3913,25.0997,59.0044,100.858,113.1639
+frame,c7e22c1f,Cam mới,2,2,2,t1_t2_last_ms,168,43.934,41.4814,63.7239,69.8829,70.2094
+frame,c7e22c1f,Cam mới,2,2,2,tracker_to_rgba_ms,168,0.2616,0.2121,0.6129,1.0091,1.6221
+frame,c7e22c1f,Cam mới,2,,,copy_wall_ms,630,0.4206,0.3265,1.0045,1.4486,5.3286
+frame,c7e22c1f,Cam mới,2,,,tracker_to_rgba_ms,812,0.2795,0.218,0.6742,1.0266,2.0639
+frame,c7e22c1f,Cam mới,3,2,1,copy_wall_ms,4,0.442,0.2993,0.8275,0.8275,0.8275
+frame,c7e22c1f,Cam mới,3,2,1,decoder_cuda_ms,4,17.9564,16.287,24.8658,24.8658,24.8658
+frame,c7e22c1f,Cam mới,3,2,1,encoder_cuda_ms,4,7.5563,7.2759,9.261,9.261,9.261
+frame,c7e22c1f,Cam mới,3,2,1,identity_verify_cuda_ms,4,2.3772,2.5337,2.9949,2.9949,2.9949
+frame,c7e22c1f,Cam mới,3,2,1,memory_encode_cuda_ms,4,3.3062,2.5916,4.353,4.353,4.353
+frame,c7e22c1f,Cam mới,3,2,1,polygon_postprocess_host_ms,4,1.0678,1.0555,1.2302,1.2302,1.2302
+frame,c7e22c1f,Cam mới,3,2,1,queue_wait_ms,4,20.3935,23.0898,28.8077,28.8077,28.8077
+frame,c7e22c1f,Cam mới,3,2,1,segment_wall_ms,4,34.9971,35.2741,41.8373,41.8373,41.8373
+frame,c7e22c1f,Cam mới,3,2,1,t0_t1_ms,4,21.3141,24.3779,29.8119,29.8119,29.8119
+frame,c7e22c1f,Cam mới,3,2,1,t1_t2_last_ms,4,25.9993,25.7202,33.0528,33.0528,33.0528
+frame,c7e22c1f,Cam mới,3,2,1,tracker_to_rgba_ms,4,0.2995,0.2448,0.5358,0.5358,0.5358
+frame,c7e22c1f,Cam mới,3,2,2,copy_wall_ms,3,0.2685,0.3135,0.3339,0.3339,0.3339
+frame,c7e22c1f,Cam mới,3,2,2,decoder_cuda_ms,3,30.8685,32.4856,38.0265,38.0265,38.0265
+frame,c7e22c1f,Cam mới,3,2,2,encoder_cuda_ms,3,9.359,9.894,10.5066,10.5066,10.5066
+frame,c7e22c1f,Cam mới,3,2,2,identity_verify_cuda_ms,3,2.0504,1.9196,2.5447,2.5447,2.5447
+frame,c7e22c1f,Cam mới,3,2,2,memory_encode_cuda_ms,3,2.4691,2.4263,2.7608,2.7608,2.7608
+frame,c7e22c1f,Cam mới,3,2,2,polygon_postprocess_host_ms,3,1.1015,1.0488,1.4777,1.4777,1.4777
+frame,c7e22c1f,Cam mới,3,2,2,queue_wait_ms,3,20.1739,16.0044,30.5754,30.5754,30.5754
+frame,c7e22c1f,Cam mới,3,2,2,segment_wall_ms,3,50.9226,52.722,56.6278,56.6278,56.6278
+frame,c7e22c1f,Cam mới,3,2,2,t0_t1_ms,3,20.8025,16.3801,31.3682,31.3682,31.3682
+frame,c7e22c1f,Cam mới,3,2,2,t1_t2_last_ms,3,45.0771,45.0525,49.8881,49.8881,49.8881
+frame,c7e22c1f,Cam mới,3,2,2,tracker_to_rgba_ms,3,0.2027,0.2322,0.2586,0.2586,0.2586
+frame,c7e22c1f,Cam mới,3,3,1,copy_wall_ms,215,0.4051,0.3253,0.8083,2.3636,3.277
+frame,c7e22c1f,Cam mới,3,3,1,decoder_cuda_ms,215,14.753,13.6482,23.9143,28.1663,30.2032
+frame,c7e22c1f,Cam mới,3,3,1,encoder_cuda_ms,215,8.3724,7.8587,12.4577,15.3453,17.8584
+frame,c7e22c1f,Cam mới,3,3,1,identity_verify_cuda_ms,215,1.3547,1.0537,3.1654,3.806,4.3764
+frame,c7e22c1f,Cam mới,3,3,1,memory_encode_cuda_ms,215,2.9934,2.3811,5.8667,7.0688,7.462
+frame,c7e22c1f,Cam mới,3,3,1,polygon_postprocess_host_ms,215,1.1092,0.9761,2.247,2.7649,3.5333
+frame,c7e22c1f,Cam mới,3,3,1,queue_wait_ms,215,25.4248,23.4731,65.5767,86.2626,108.1018
+frame,c7e22c1f,Cam mới,3,3,1,segment_wall_ms,215,31.3822,29.0698,45.3171,50.2113,53.7396
+frame,c7e22c1f,Cam mới,3,3,1,t0_t1_ms,215,26.2813,24.2952,66.262,86.6872,108.963
+frame,c7e22c1f,Cam mới,3,3,1,t1_t2_last_ms,215,23.9412,22.3617,35.2194,38.6623,42.1157
+frame,c7e22c1f,Cam mới,3,3,1,tracker_to_rgba_ms,215,0.2871,0.2136,0.842,1.5928,2.6505
+frame,c7e22c1f,Cam mới,3,3,2,copy_wall_ms,132,0.3394,0.303,0.6449,1.4379,1.8916
+frame,c7e22c1f,Cam mới,3,3,2,decoder_cuda_ms,132,26.22,25.7498,37.3081,46.9789,53.6188
+frame,c7e22c1f,Cam mới,3,3,2,encoder_cuda_ms,132,8.1353,7.6094,11.6853,15.0796,17.3346
+frame,c7e22c1f,Cam mới,3,3,2,identity_verify_cuda_ms,132,2.3878,2.2615,4.006,5.5419,6.2741
+frame,c7e22c1f,Cam mới,3,3,2,memory_encode_cuda_ms,132,4.1105,3.8691,8.3221,9.1559,10.4242
+frame,c7e22c1f,Cam mới,3,3,2,polygon_postprocess_host_ms,132,1.5085,1.3349,3.1335,4.0238,4.2114
+frame,c7e22c1f,Cam mới,3,3,2,queue_wait_ms,132,26.4954,23.1159,64.0962,100.2668,103.7052
+frame,c7e22c1f,Cam mới,3,3,2,segment_wall_ms,132,47.1215,45.9169,63.727,74.5768,82.5561
+frame,c7e22c1f,Cam mới,3,3,2,t0_t1_ms,132,27.2331,23.7669,64.627,101.2012,104.3731
+frame,c7e22c1f,Cam mới,3,3,2,t1_t2_last_ms,132,41.6128,39.8444,57.6815,66.3451,70.2867
+frame,c7e22c1f,Cam mới,3,3,2,tracker_to_rgba_ms,132,0.2416,0.208,0.5081,0.7017,1.124
+frame,c7e22c1f,Cam mới,3,3,3,copy_wall_ms,212,0.388,0.332,0.8099,1.2566,3.6767
+frame,c7e22c1f,Cam mới,3,3,3,decoder_cuda_ms,212,36.3191,33.4882,52.0322,63.1653,136.8831
+frame,c7e22c1f,Cam mới,3,3,3,encoder_cuda_ms,212,8.4332,7.7673,13.0734,17.0153,24.8423
+frame,c7e22c1f,Cam mới,3,3,3,identity_verify_cuda_ms,212,4.1358,3.616,6.8853,14.0279,14.8862
+frame,c7e22c1f,Cam mới,3,3,3,memory_encode_cuda_ms,212,3.6156,3.0218,7.398,9.467,13.2971
+frame,c7e22c1f,Cam mới,3,3,3,polygon_postprocess_host_ms,212,1.4234,1.1725,2.803,6.0375,10.6418
+frame,c7e22c1f,Cam mới,3,3,3,queue_wait_ms,212,23.3628,21.6871,55.1004,69.8359,100.5722
+frame,c7e22c1f,Cam mới,3,3,3,segment_wall_ms,212,61.3977,57.8507,91.803,130.363,156.0981
+frame,c7e22c1f,Cam mới,3,3,3,t0_t1_ms,212,24.2167,22.2751,55.9248,71.3548,101.4755
+frame,c7e22c1f,Cam mới,3,3,3,t1_t2_last_ms,212,57.001,52.957,85.4487,121.314,152.7852
+frame,c7e22c1f,Cam mới,3,3,3,tracker_to_rgba_ms,212,0.2991,0.2175,0.6249,0.987,6.8634
+frame,c7e22c1f,Cam mới,3,3,,copy_wall_ms,1,0.522,0.522,0.522,0.522,0.522
+frame,c7e22c1f,Cam mới,3,3,,decoder_cuda_ms,1,29.2108,29.2108,29.2108,29.2108,29.2108
+frame,c7e22c1f,Cam mới,3,3,,encoder_cuda_ms,1,7.0941,7.0941,7.0941,7.0941,7.0941
+frame,c7e22c1f,Cam mới,3,3,,identity_verify_cuda_ms,1,3.9675,3.9675,3.9675,3.9675,3.9675
+frame,c7e22c1f,Cam mới,3,3,,memory_encode_cuda_ms,1,6.3661,6.3661,6.3661,6.3661,6.3661
+frame,c7e22c1f,Cam mới,3,3,,polygon_postprocess_host_ms,1,1.1428,1.1428,1.1428,1.1428,1.1428
+frame,c7e22c1f,Cam mới,3,3,,queue_wait_ms,1,10.415,10.415,10.415,10.415,10.415
+frame,c7e22c1f,Cam mới,3,3,,t0_t1_ms,1,11.5578,11.5578,11.5578,11.5578,11.5578
+frame,c7e22c1f,Cam mới,3,3,,t1_t2_last_ms,1,44.9214,44.9214,44.9214,44.9214,44.9214
+frame,c7e22c1f,Cam mới,3,3,,tracker_to_rgba_ms,1,0.3932,0.3932,0.3932,0.3932,0.3932
+frame,c7e22c1f,Cam mới,3,,,copy_wall_ms,1149,0.4308,0.3252,1.0018,2.2331,6.8228
+frame,c7e22c1f,Cam mới,3,,,tracker_to_rgba_ms,1478,0.2921,0.2173,0.6935,1.4789,8.025
+frame,c7e22c1f,Cam mới,4,4,1,copy_wall_ms,1,0.4394,0.4394,0.4394,0.4394,0.4394
+frame,c7e22c1f,Cam mới,4,4,1,decoder_cuda_ms,1,11.9166,11.9166,11.9166,11.9166,11.9166
+frame,c7e22c1f,Cam mới,4,4,1,encoder_cuda_ms,1,6.1276,6.1276,6.1276,6.1276,6.1276
+frame,c7e22c1f,Cam mới,4,4,1,identity_verify_cuda_ms,1,0.7292,0.7292,0.7292,0.7292,0.7292
+frame,c7e22c1f,Cam mới,4,4,1,memory_encode_cuda_ms,1,6.274,6.274,6.274,6.274,6.274
+frame,c7e22c1f,Cam mới,4,4,1,polygon_postprocess_host_ms,1,0.8515,0.8515,0.8515,0.8515,0.8515
+frame,c7e22c1f,Cam mới,4,4,1,queue_wait_ms,1,23.0748,23.0748,23.0748,23.0748,23.0748
+frame,c7e22c1f,Cam mới,4,4,1,segment_wall_ms,1,28.915,28.915,28.915,28.915,28.915
+frame,c7e22c1f,Cam mới,4,4,1,t0_t1_ms,1,23.7828,23.7828,23.7828,23.7828,23.7828
+frame,c7e22c1f,Cam mới,4,4,1,t1_t2_last_ms,1,18.438,18.438,18.438,18.438,18.438
+frame,c7e22c1f,Cam mới,4,4,1,tracker_to_rgba_ms,1,0.1309,0.1309,0.1309,0.1309,0.1309
+frame,c7e22c1f,Cam mới,4,4,2,copy_wall_ms,6,0.8094,0.2664,3.5457,3.5457,3.5457
+frame,c7e22c1f,Cam mới,4,4,2,decoder_cuda_ms,6,27.2572,22.972,36.4926,36.4926,36.4926
+frame,c7e22c1f,Cam mới,4,4,2,encoder_cuda_ms,6,8.8137,8.6224,11.0913,11.0913,11.0913
+frame,c7e22c1f,Cam mới,4,4,2,identity_verify_cuda_ms,6,2.6867,1.8917,4.788,4.788,4.788
+frame,c7e22c1f,Cam mới,4,4,2,memory_encode_cuda_ms,6,3.8182,2.2837,7.2445,7.2445,7.2445
+frame,c7e22c1f,Cam mới,4,4,2,polygon_postprocess_host_ms,6,0.9896,0.8762,1.5263,1.5263,1.5263
+frame,c7e22c1f,Cam mới,4,4,2,queue_wait_ms,6,17.939,8.1985,41.3672,41.3672,41.3672
+frame,c7e22c1f,Cam mới,4,4,2,segment_wall_ms,6,48.4993,40.5256,67.4107,67.4107,67.4107
+frame,c7e22c1f,Cam mới,4,4,2,t0_t1_ms,6,19.3076,8.6706,42.1275,42.1275,42.1275
+frame,c7e22c1f,Cam mới,4,4,2,t1_t2_last_ms,6,45.055,38.041,62.6961,62.6961,62.6961
+frame,c7e22c1f,Cam mới,4,4,2,tracker_to_rgba_ms,6,0.3852,0.2062,1.2955,1.2955,1.2955
+frame,c7e22c1f,Cam mới,4,4,3,copy_wall_ms,5,0.392,0.339,0.7263,0.7263,0.7263
+frame,c7e22c1f,Cam mới,4,4,3,decoder_cuda_ms,5,38.9772,30.7226,67.7764,67.7764,67.7764
+frame,c7e22c1f,Cam mới,4,4,3,encoder_cuda_ms,5,9.9698,7.9893,16.5892,16.5892,16.5892
+frame,c7e22c1f,Cam mới,4,4,3,identity_verify_cuda_ms,5,3.1977,3.035,4.2615,4.2615,4.2615
+frame,c7e22c1f,Cam mới,4,4,3,memory_encode_cuda_ms,5,2.8517,2.7674,4.2103,4.2103,4.2103
+frame,c7e22c1f,Cam mới,4,4,3,polygon_postprocess_host_ms,5,0.8042,0.6423,1.2015,1.2015,1.2015
+frame,c7e22c1f,Cam mới,4,4,3,queue_wait_ms,5,32.1926,33.5968,59.7413,59.7413,59.7413
+frame,c7e22c1f,Cam mới,4,4,3,segment_wall_ms,5,63.371,50.3781,92.4859,92.4859,92.4859
+frame,c7e22c1f,Cam mới,4,4,3,t0_t1_ms,5,33.0285,34.2851,60.2347,60.2347,60.2347
+frame,c7e22c1f,Cam mới,4,4,3,t1_t2_last_ms,5,60.7186,47.9731,88.6741,88.6741,88.6741
+frame,c7e22c1f,Cam mới,4,4,3,tracker_to_rgba_ms,5,0.2558,0.1929,0.5052,0.5052,0.5052
+frame,c7e22c1f,Cam mới,4,4,4,copy_wall_ms,1,0.2509,0.2509,0.2509,0.2509,0.2509
+frame,c7e22c1f,Cam mới,4,4,4,decoder_cuda_ms,1,66.2074,66.2074,66.2074,66.2074,66.2074
+frame,c7e22c1f,Cam mới,4,4,4,encoder_cuda_ms,1,23.577,23.577,23.577,23.577,23.577
+frame,c7e22c1f,Cam mới,4,4,4,identity_verify_cuda_ms,1,7.9667,7.9667,7.9667,7.9667,7.9667
+frame,c7e22c1f,Cam mới,4,4,4,memory_encode_cuda_ms,1,3.5435,3.5435,3.5435,3.5435,3.5435
+frame,c7e22c1f,Cam mới,4,4,4,polygon_postprocess_host_ms,1,0.7852,0.7852,0.7852,0.7852,0.7852
+frame,c7e22c1f,Cam mới,4,4,4,queue_wait_ms,1,35.5922,35.5922,35.5922,35.5922,35.5922
+frame,c7e22c1f,Cam mới,4,4,4,segment_wall_ms,1,113.3547,113.3547,113.3547,113.3547,113.3547
+frame,c7e22c1f,Cam mới,4,4,4,t0_t1_ms,1,36.2393,36.2393,36.2393,36.2393,36.2393
+frame,c7e22c1f,Cam mới,4,4,4,t1_t2_last_ms,1,110.8078,110.8078,110.8078,110.8078,110.8078
+frame,c7e22c1f,Cam mới,4,4,4,tracker_to_rgba_ms,1,0.1958,0.1958,0.1958,0.1958,0.1958
+frame,c7e22c1f,Cam mới,4,,,copy_wall_ms,31,0.3576,0.3045,0.809,0.8354,0.8354
+frame,c7e22c1f,Cam mới,4,,,tracker_to_rgba_ms,44,0.2829,0.2343,0.5532,0.7655,0.7655
+frame,d1f37ed1,Cam hik 1,1,1,0,copy_wall_ms,123,0.3505,0.2686,0.9226,1.895,2.361
+frame,d1f37ed1,Cam hik 1,1,1,0,encoder_cuda_ms,123,7.8215,7.4981,10.6476,15.0692,15.2101
+frame,d1f37ed1,Cam hik 1,1,1,0,queue_wait_ms,123,27.2098,20.2953,72.6285,152.9406,157.6384
+frame,d1f37ed1,Cam hik 1,1,1,0,segment_wall_ms,123,5.8276,5.1038,10.5001,12.0763,15.1299
+frame,d1f37ed1,Cam hik 1,1,1,0,t0_t1_ms,123,27.8944,21.0701,73.1384,153.7842,158.092
+frame,d1f37ed1,Cam hik 1,1,1,0,tracker_to_rgba_ms,123,0.2285,0.1815,0.4939,0.7444,0.7458
+frame,d1f37ed1,Cam hik 1,1,1,1,copy_wall_ms,135,0.3336,0.2752,0.8368,1.1872,1.3487
+frame,d1f37ed1,Cam hik 1,1,1,1,decoder_cuda_ms,135,9.9895,8.9715,17.6166,20.4549,21.2343
+frame,d1f37ed1,Cam hik 1,1,1,1,encoder_cuda_ms,135,8.2469,7.6732,11.9363,13.2977,18.077
+frame,d1f37ed1,Cam hik 1,1,1,1,identity_verify_cuda_ms,135,1.293,1.1041,2.5618,2.9366,4.1129
+frame,d1f37ed1,Cam hik 1,1,1,1,queue_wait_ms,135,29.0736,23.2657,104.8308,150.0965,169.7728
+frame,d1f37ed1,Cam hik 1,1,1,1,segment_wall_ms,135,22.3034,20.962,33.9087,37.1321,38.2812
+frame,d1f37ed1,Cam hik 1,1,1,1,t0_t1_ms,135,29.7722,24.1355,105.2469,150.6031,170.3334
+frame,d1f37ed1,Cam hik 1,1,1,1,t1_t2_last_ms,135,19.0045,17.81,29.225,32.2643,32.6941
+frame,d1f37ed1,Cam hik 1,1,1,1,tracker_to_rgba_ms,135,0.2534,0.2125,0.6148,0.8113,1.057
+frame,d1f37ed1,Cam hik 1,1,2,1,copy_wall_ms,129,0.3552,0.268,0.9217,1.6885,2.177
+frame,d1f37ed1,Cam hik 1,1,2,1,decoder_cuda_ms,129,15.3413,14.6437,23.6797,27.9641,29.586
+frame,d1f37ed1,Cam hik 1,1,2,1,encoder_cuda_ms,129,8.8269,8.7032,12.1829,13.9623,14.4655
+frame,d1f37ed1,Cam hik 1,1,2,1,identity_verify_cuda_ms,102,1.5273,1.3704,3.0593,4.1382,4.9874
+frame,d1f37ed1,Cam hik 1,1,2,1,memory_encode_cuda_ms,98,3.3756,2.8737,6.064,9.6807,9.6807
+frame,d1f37ed1,Cam hik 1,1,2,1,polygon_postprocess_host_ms,98,1.5167,1.3741,2.5905,3.956,3.956
+frame,d1f37ed1,Cam hik 1,1,2,1,queue_wait_ms,129,33.4241,22.2215,145.1926,181.4377,190.2151
+frame,d1f37ed1,Cam hik 1,1,2,1,segment_wall_ms,129,31.5491,31.5364,44.0521,47.2898,52.592
+frame,d1f37ed1,Cam hik 1,1,2,1,t0_t1_ms,129,34.1296,22.9932,145.9448,181.9297,191.6297
+frame,d1f37ed1,Cam hik 1,1,2,1,t1_t2_last_ms,129,24.8521,24.743,35.4075,39.0143,44.6545
+frame,d1f37ed1,Cam hik 1,1,2,1,tracker_to_rgba_ms,129,0.2352,0.1904,0.5106,0.7623,0.7947
+frame,d1f37ed1,Cam hik 1,1,2,2,copy_wall_ms,141,0.3492,0.264,0.7976,1.6095,2.5791
+frame,d1f37ed1,Cam hik 1,1,2,2,decoder_cuda_ms,141,24.3785,23.5133,34.626,40.5098,43.9719
+frame,d1f37ed1,Cam hik 1,1,2,2,encoder_cuda_ms,141,8.618,8.4093,11.8343,14.3824,17.4438
+frame,d1f37ed1,Cam hik 1,1,2,2,identity_verify_cuda_ms,141,2.5661,2.3828,4.8277,5.3746,5.6267
+frame,d1f37ed1,Cam hik 1,1,2,2,memory_encode_cuda_ms,114,3.36,2.6159,6.9542,9.0379,9.7063
+frame,d1f37ed1,Cam hik 1,1,2,2,polygon_postprocess_host_ms,114,2.5216,1.254,3.2197,4.7202,115.7555
+frame,d1f37ed1,Cam hik 1,1,2,2,queue_wait_ms,141,25.2594,19.3207,54.1059,182.3422,245.8703
+frame,d1f37ed1,Cam hik 1,1,2,2,segment_wall_ms,141,45.3903,42.9409,61.513,71.3952,158.1079
+frame,d1f37ed1,Cam hik 1,1,2,2,t0_t1_ms,141,25.9773,20.1214,54.8682,183.678,246.624
+frame,d1f37ed1,Cam hik 1,1,2,2,t1_t2_last_ms,141,42.0009,40.0063,56.4267,65.2404,153.5632
+frame,d1f37ed1,Cam hik 1,1,2,2,tracker_to_rgba_ms,141,0.2587,0.1889,0.5512,1.0518,2.4118
+frame,d1f37ed1,Cam hik 1,1,,,copy_wall_ms,1437,0.3796,0.2828,0.8968,1.9349,4.6883
+frame,d1f37ed1,Cam hik 1,1,,,tracker_to_rgba_ms,1823,0.2612,0.1954,0.6421,1.1095,5.1521
+frame,d1f37ed1,Cam hik 1,2,2,0,copy_wall_ms,1,0.1488,0.1488,0.1488,0.1488,0.1488
+frame,d1f37ed1,Cam hik 1,2,2,0,encoder_cuda_ms,1,8.0808,8.0808,8.0808,8.0808,8.0808
+frame,d1f37ed1,Cam hik 1,2,2,0,queue_wait_ms,1,36.0797,36.0797,36.0797,36.0797,36.0797
+frame,d1f37ed1,Cam hik 1,2,2,0,segment_wall_ms,1,5.715,5.715,5.715,5.715,5.715
+frame,d1f37ed1,Cam hik 1,2,2,0,t0_t1_ms,1,36.4304,36.4304,36.4304,36.4304,36.4304
+frame,d1f37ed1,Cam hik 1,2,2,0,tracker_to_rgba_ms,1,0.1096,0.1096,0.1096,0.1096,0.1096
+frame,d1f37ed1,Cam hik 1,2,2,1,copy_wall_ms,5,0.4043,0.3794,0.7389,0.7389,0.7389
+frame,d1f37ed1,Cam hik 1,2,2,1,decoder_cuda_ms,5,8.5948,8.246,10.8819,10.8819,10.8819
+frame,d1f37ed1,Cam hik 1,2,2,1,encoder_cuda_ms,5,8.8602,8.5707,11.0514,11.0514,11.0514
+frame,d1f37ed1,Cam hik 1,2,2,1,identity_verify_cuda_ms,5,1.4202,1.2287,2.1678,2.1678,2.1678
+frame,d1f37ed1,Cam hik 1,2,2,1,memory_encode_cuda_ms,1,2.7944,2.7944,2.7944,2.7944,2.7944
+frame,d1f37ed1,Cam hik 1,2,2,1,polygon_postprocess_host_ms,1,1.0115,1.0115,1.0115,1.0115,1.0115
+frame,d1f37ed1,Cam hik 1,2,2,1,queue_wait_ms,5,16.4134,11.196,28.3335,28.3335,28.3335
+frame,d1f37ed1,Cam hik 1,2,2,1,segment_wall_ms,5,21.779,19.5088,30.2228,30.2228,30.2228
+frame,d1f37ed1,Cam hik 1,2,2,1,t0_t1_ms,5,17.2243,12.5702,29.1921,29.1921,29.1921
+frame,d1f37ed1,Cam hik 1,2,2,1,t1_t2_last_ms,5,17.9265,16.9801,22.4332,22.4332,22.4332
+frame,d1f37ed1,Cam hik 1,2,2,1,tracker_to_rgba_ms,5,0.2711,0.1834,0.4911,0.4911,0.4911
+frame,d1f37ed1,Cam hik 1,2,2,2,copy_wall_ms,7,0.3562,0.3725,0.5756,0.5756,0.5756
+frame,d1f37ed1,Cam hik 1,2,2,2,decoder_cuda_ms,7,21.6119,19.5279,28.4035,28.4035,28.4035
+frame,d1f37ed1,Cam hik 1,2,2,2,encoder_cuda_ms,7,8.612,7.347,14.282,14.282,14.282
+frame,d1f37ed1,Cam hik 1,2,2,2,identity_verify_cuda_ms,7,2.2558,2.4928,3.074,3.074,3.074
+frame,d1f37ed1,Cam hik 1,2,2,2,memory_encode_cuda_ms,5,2.1555,2.106,2.5362,2.5362,2.5362
+frame,d1f37ed1,Cam hik 1,2,2,2,polygon_postprocess_host_ms,5,1.1667,0.9565,1.9032,1.9032,1.9032
+frame,d1f37ed1,Cam hik 1,2,2,2,queue_wait_ms,7,20.9145,27.0492,31.4294,31.4294,31.4294
+frame,d1f37ed1,Cam hik 1,2,2,2,segment_wall_ms,7,40.8468,40.4205,53.592,53.592,53.592
+frame,d1f37ed1,Cam hik 1,2,2,2,t0_t1_ms,7,21.6051,27.7893,31.8957,31.8957,31.8957
+frame,d1f37ed1,Cam hik 1,2,2,2,t1_t2_last_ms,7,37.9417,36.5973,50.8499,50.8499,50.8499
+frame,d1f37ed1,Cam hik 1,2,2,2,tracker_to_rgba_ms,7,0.2045,0.2028,0.2737,0.2737,0.2737
+frame,d1f37ed1,Cam hik 1,2,3,1,copy_wall_ms,71,0.3518,0.2981,0.7081,1.3998,1.3998
+frame,d1f37ed1,Cam hik 1,2,3,1,decoder_cuda_ms,71,15.2776,14.446,27.916,30.1468,30.1468
+frame,d1f37ed1,Cam hik 1,2,3,1,encoder_cuda_ms,71,8.6192,7.7729,13.3423,14.9203,14.9203
+frame,d1f37ed1,Cam hik 1,2,3,1,identity_verify_cuda_ms,71,1.3286,1.1119,2.3788,4.1822,4.1822
+frame,d1f37ed1,Cam hik 1,2,3,1,memory_encode_cuda_ms,71,5.6269,2.2425,6.4931,206.4695,206.4695
+frame,d1f37ed1,Cam hik 1,2,3,1,polygon_postprocess_host_ms,71,1.4578,1.2733,2.4432,3.4197,3.4197
+frame,d1f37ed1,Cam hik 1,2,3,1,queue_wait_ms,71,30.3234,24.9594,93.7296,138.6749,138.6749
+frame,d1f37ed1,Cam hik 1,2,3,1,segment_wall_ms,71,34.8764,30.4502,50.7412,239.1886,239.1886
+frame,d1f37ed1,Cam hik 1,2,3,1,t0_t1_ms,71,31.0911,27.3537,95.6444,138.9881,138.9881
+frame,d1f37ed1,Cam hik 1,2,3,1,t1_t2_last_ms,71,24.5672,23.4455,40.124,43.5337,43.5337
+frame,d1f37ed1,Cam hik 1,2,3,1,tracker_to_rgba_ms,71,0.2802,0.2075,0.6589,1.4045,1.4045
+frame,d1f37ed1,Cam hik 1,2,3,2,copy_wall_ms,83,0.3492,0.2728,0.6686,2.8266,2.8266
+frame,d1f37ed1,Cam hik 1,2,3,2,decoder_cuda_ms,83,25.1865,23.6814,37.8424,43.33,43.33
+frame,d1f37ed1,Cam hik 1,2,3,2,encoder_cuda_ms,83,8.9658,8.4092,13.4404,29.8877,29.8877
+frame,d1f37ed1,Cam hik 1,2,3,2,identity_verify_cuda_ms,83,2.8211,2.7009,4.6012,5.7875,5.7875
+frame,d1f37ed1,Cam hik 1,2,3,2,memory_encode_cuda_ms,83,3.6423,3.3089,7.3778,8.6451,8.6451
+frame,d1f37ed1,Cam hik 1,2,3,2,polygon_postprocess_host_ms,83,1.5877,1.4094,2.6947,5.3417,5.3417
+frame,d1f37ed1,Cam hik 1,2,3,2,queue_wait_ms,83,26.7886,21.1741,74.958,142.8083,142.8083
+frame,d1f37ed1,Cam hik 1,2,3,2,segment_wall_ms,83,47.9409,45.1057,65.9226,76.4927,76.4927
+frame,d1f37ed1,Cam hik 1,2,3,2,t0_t1_ms,83,27.5198,21.5611,75.6672,144.173,144.173
+frame,d1f37ed1,Cam hik 1,2,3,2,t1_t2_last_ms,83,44.3709,42.4728,60.6844,72.3913,72.3913
+frame,d1f37ed1,Cam hik 1,2,3,2,tracker_to_rgba_ms,83,0.2492,0.21,0.5235,1.447,1.447
+frame,d1f37ed1,Cam hik 1,2,3,3,copy_wall_ms,4,0.3051,0.2373,0.4484,0.4484,0.4484
+frame,d1f37ed1,Cam hik 1,2,3,3,decoder_cuda_ms,4,39.7738,37.2034,55.0264,55.0264,55.0264
+frame,d1f37ed1,Cam hik 1,2,3,3,encoder_cuda_ms,4,8.1252,7.5903,10.5356,10.5356,10.5356
+frame,d1f37ed1,Cam hik 1,2,3,3,identity_verify_cuda_ms,4,3.8764,2.8406,6.2383,6.2383,6.2383
+frame,d1f37ed1,Cam hik 1,2,3,3,memory_encode_cuda_ms,4,2.9513,1.9206,5.0136,5.0136,5.0136
+frame,d1f37ed1,Cam hik 1,2,3,3,polygon_postprocess_host_ms,4,1.7558,1.7188,2.3234,2.3234,2.3234
+frame,d1f37ed1,Cam hik 1,2,3,3,queue_wait_ms,4,24.4523,18.0841,42.6725,42.6725,42.6725
+frame,d1f37ed1,Cam hik 1,2,3,3,segment_wall_ms,4,64.9326,57.8892,83.6044,83.6044,83.6044
+frame,d1f37ed1,Cam hik 1,2,3,3,t0_t1_ms,4,25.2971,18.8815,43.4791,43.4791,43.4791
+frame,d1f37ed1,Cam hik 1,2,3,3,t1_t2_last_ms,4,61.1283,55.6848,81.1253,81.1253,81.1253
+frame,d1f37ed1,Cam hik 1,2,3,3,tracker_to_rgba_ms,4,0.3848,0.3282,0.5928,0.5928,0.5928
+frame,d1f37ed1,Cam hik 1,2,,,copy_wall_ms,506,0.3511,0.2882,0.7538,1.3084,3.0728
+frame,d1f37ed1,Cam hik 1,2,,,tracker_to_rgba_ms,648,0.2602,0.197,0.6597,1.0147,2.8484
+frame,d1f37ed1,Cam hik 1,3,3,1,copy_wall_ms,2,0.5926,0.512,0.6731,0.6731,0.6731
+frame,d1f37ed1,Cam hik 1,3,3,1,decoder_cuda_ms,2,19.8552,15.5595,24.1508,24.1508,24.1508
+frame,d1f37ed1,Cam hik 1,3,3,1,encoder_cuda_ms,2,8.265,7.5961,8.9339,8.9339,8.9339
+frame,d1f37ed1,Cam hik 1,3,3,1,identity_verify_cuda_ms,2,0.7636,0.5414,0.9858,0.9858,0.9858
+frame,d1f37ed1,Cam hik 1,3,3,1,memory_encode_cuda_ms,2,1.8484,1.6936,2.0032,2.0032,2.0032
+frame,d1f37ed1,Cam hik 1,3,3,1,polygon_postprocess_host_ms,2,1.3624,1.0354,1.6893,1.6893,1.6893
+frame,d1f37ed1,Cam hik 1,3,3,1,queue_wait_ms,2,38.4887,13.46,63.5174,63.5174,63.5174
+frame,d1f37ed1,Cam hik 1,3,3,1,segment_wall_ms,2,35.8192,32.4526,39.1859,39.1859,39.1859
+frame,d1f37ed1,Cam hik 1,3,3,1,t0_t1_ms,2,39.4448,14.2981,64.5915,64.5915,64.5915
+frame,d1f37ed1,Cam hik 1,3,3,1,t1_t2_last_ms,2,28.6249,25.1705,32.0794,32.0794,32.0794
+frame,d1f37ed1,Cam hik 1,3,3,1,tracker_to_rgba_ms,2,0.211,0.1699,0.2521,0.2521,0.2521
+frame,d1f37ed1,Cam hik 1,3,3,3,copy_wall_ms,2,0.2096,0.2043,0.215,0.215,0.215
+frame,d1f37ed1,Cam hik 1,3,3,3,decoder_cuda_ms,2,27.1791,25.7914,28.5668,28.5668,28.5668
+frame,d1f37ed1,Cam hik 1,3,3,3,encoder_cuda_ms,2,5.5954,5.5869,5.604,5.604,5.604
+frame,d1f37ed1,Cam hik 1,3,3,3,identity_verify_cuda_ms,2,2.5349,2.5271,2.5427,2.5427,2.5427
+frame,d1f37ed1,Cam hik 1,3,3,3,memory_encode_cuda_ms,2,1.945,1.6956,2.1943,2.1943,2.1943
+frame,d1f37ed1,Cam hik 1,3,3,3,polygon_postprocess_host_ms,2,1.1347,0.9585,1.3108,1.3108,1.3108
+frame,d1f37ed1,Cam hik 1,3,3,3,queue_wait_ms,2,9.7256,6.9862,12.465,12.465,12.465
+frame,d1f37ed1,Cam hik 1,3,3,3,segment_wall_ms,2,45.1137,42.2187,48.0088,48.0088,48.0088
+frame,d1f37ed1,Cam hik 1,3,3,3,t0_t1_ms,2,10.3049,7.5415,13.0684,13.0684,13.0684
+frame,d1f37ed1,Cam hik 1,3,3,3,t1_t2_last_ms,2,42.9136,40.1512,45.6761,45.6761,45.6761
+frame,d1f37ed1,Cam hik 1,3,3,3,tracker_to_rgba_ms,2,0.2389,0.1968,0.281,0.281,0.281
+frame,d1f37ed1,Cam hik 1,3,4,1,copy_wall_ms,1,0.3087,0.3087,0.3087,0.3087,0.3087
+frame,d1f37ed1,Cam hik 1,3,4,1,decoder_cuda_ms,1,23.0229,23.0229,23.0229,23.0229,23.0229
+frame,d1f37ed1,Cam hik 1,3,4,1,encoder_cuda_ms,1,9.7973,9.7973,9.7973,9.7973,9.7973
+frame,d1f37ed1,Cam hik 1,3,4,1,identity_verify_cuda_ms,1,0.9384,0.9384,0.9384,0.9384,0.9384
+frame,d1f37ed1,Cam hik 1,3,4,1,memory_encode_cuda_ms,1,3.7034,3.7034,3.7034,3.7034,3.7034
+frame,d1f37ed1,Cam hik 1,3,4,1,polygon_postprocess_host_ms,1,1.5811,1.5811,1.5811,1.5811,1.5811
+frame,d1f37ed1,Cam hik 1,3,4,1,queue_wait_ms,1,30.2359,30.2359,30.2359,30.2359,30.2359
+frame,d1f37ed1,Cam hik 1,3,4,1,segment_wall_ms,1,41.6555,41.6555,41.6555,41.6555,41.6555
+frame,d1f37ed1,Cam hik 1,3,4,1,t0_t1_ms,1,31.0421,31.0421,31.0421,31.0421,31.0421
+frame,d1f37ed1,Cam hik 1,3,4,1,t1_t2_last_ms,1,33.6956,33.6956,33.6956,33.6956,33.6956
+frame,d1f37ed1,Cam hik 1,3,4,1,tracker_to_rgba_ms,1,0.3201,0.3201,0.3201,0.3201,0.3201
+frame,d1f37ed1,Cam hik 1,3,4,3,copy_wall_ms,3,0.2392,0.2358,0.2867,0.2867,0.2867
+frame,d1f37ed1,Cam hik 1,3,4,3,decoder_cuda_ms,3,33.25,30.6227,45.1253,45.1253,45.1253
+frame,d1f37ed1,Cam hik 1,3,4,3,encoder_cuda_ms,3,7.1583,7.063,7.4091,7.4091,7.4091
+frame,d1f37ed1,Cam hik 1,3,4,3,identity_verify_cuda_ms,3,3.252,3.0377,4.3169,4.3169,4.3169
+frame,d1f37ed1,Cam hik 1,3,4,3,memory_encode_cuda_ms,3,5.9035,7.9715,8.1427,8.1427,8.1427
+frame,d1f37ed1,Cam hik 1,3,4,3,polygon_postprocess_host_ms,3,2.1163,2.0787,3.2543,3.2543,3.2543
+frame,d1f37ed1,Cam hik 1,3,4,3,queue_wait_ms,3,31.4134,34.33,59.0129,59.0129,59.0129
+frame,d1f37ed1,Cam hik 1,3,4,3,segment_wall_ms,3,59.6639,59.1788,74.7994,74.7994,74.7994
+frame,d1f37ed1,Cam hik 1,3,4,3,t0_t1_ms,3,31.9979,34.9064,59.6965,59.6965,59.6965
+frame,d1f37ed1,Cam hik 1,3,4,3,t1_t2_last_ms,3,56.6666,56.6439,70.1788,70.1788,70.1788
+frame,d1f37ed1,Cam hik 1,3,4,3,tracker_to_rgba_ms,3,0.2115,0.2265,0.2322,0.2322,0.2322
+frame,d1f37ed1,Cam hik 1,3,,,copy_wall_ms,14,0.3786,0.3276,0.8591,0.8591,0.8591
+frame,d1f37ed1,Cam hik 1,3,,,tracker_to_rgba_ms,18,0.2648,0.2241,0.6301,0.6301,0.6301
+frame,e0606b55,Cam hướng ra cửa,1,,,copy_wall_ms,1,0.2072,0.2072,0.2072,0.2072,0.2072
+frame,e0606b55,Cam hướng ra cửa,1,,,tracker_to_rgba_ms,1,0.1269,0.1269,0.1269,0.1269,0.1269
+frame,e0606b55,Cam hướng ra cửa,2,2,1,copy_wall_ms,91,0.3119,0.2493,0.6168,1.6233,1.6233
+frame,e0606b55,Cam hướng ra cửa,2,2,1,decoder_cuda_ms,91,14.1708,13.21,23.707,26.5693,26.5693
+frame,e0606b55,Cam hướng ra cửa,2,2,1,encoder_cuda_ms,91,8.1796,7.5248,12.5518,15.8252,15.8252
+frame,e0606b55,Cam hướng ra cửa,2,2,1,identity_verify_cuda_ms,91,1.1789,0.9341,2.7995,6.2793,6.2793
+frame,e0606b55,Cam hướng ra cửa,2,2,1,memory_encode_cuda_ms,91,2.785,2.2995,5.0889,8.0521,8.0521
+frame,e0606b55,Cam hướng ra cửa,2,2,1,polygon_postprocess_host_ms,91,1.1211,0.949,2.2756,3.4212,3.4212
+frame,e0606b55,Cam hướng ra cửa,2,2,1,queue_wait_ms,91,31.4551,23.6579,94.1311,154.4782,154.4782
+frame,e0606b55,Cam hướng ra cửa,2,2,1,segment_wall_ms,91,29.7363,27.4814,44.9167,52.1745,52.1745
+frame,e0606b55,Cam hướng ra cửa,2,2,1,t0_t1_ms,91,32.0998,24.0229,94.8784,155.0161,155.0161
+frame,e0606b55,Cam hướng ra cửa,2,2,1,t1_t2_last_ms,91,22.9448,21.7655,35.1679,38.5287,38.5287
+frame,e0606b55,Cam hướng ra cửa,2,2,1,tracker_to_rgba_ms,91,0.2081,0.1708,0.4016,0.7033,0.7033
+frame,e0606b55,Cam hướng ra cửa,2,2,2,copy_wall_ms,73,0.2895,0.2369,0.6679,1.0004,1.0004
+frame,e0606b55,Cam hướng ra cửa,2,2,2,decoder_cuda_ms,73,24.2908,22.6705,38.6529,45.5112,45.5112
+frame,e0606b55,Cam hướng ra cửa,2,2,2,encoder_cuda_ms,73,8.3237,7.8469,12.1039,14.9275,14.9275
+frame,e0606b55,Cam hướng ra cửa,2,2,2,identity_verify_cuda_ms,73,2.6529,2.2153,6.4012,6.8498,6.8498
+frame,e0606b55,Cam hướng ra cửa,2,2,2,memory_encode_cuda_ms,73,2.9032,2.3894,5.5616,6.7985,6.7985
+frame,e0606b55,Cam hướng ra cửa,2,2,2,polygon_postprocess_host_ms,73,2.3833,1.1247,2.6332,85.5464,85.5464
+frame,e0606b55,Cam hướng ra cửa,2,2,2,queue_wait_ms,73,30.7326,20.7275,66.0094,184.6856,184.6856
+frame,e0606b55,Cam hướng ra cửa,2,2,2,segment_wall_ms,73,45.2564,42.521,64.6902,128.3823,128.3823
+frame,e0606b55,Cam hướng ra cửa,2,2,2,t0_t1_ms,73,31.3615,21.1217,66.4622,185.3412,185.3412
+frame,e0606b55,Cam hướng ra cửa,2,2,2,t1_t2_last_ms,73,36.7204,35.3735,52.5034,60.657,60.657
+frame,e0606b55,Cam hướng ra cửa,2,2,2,tracker_to_rgba_ms,73,0.2181,0.1798,0.5284,1.0716,1.0716
+frame,e0606b55,Cam hướng ra cửa,2,,,copy_wall_ms,385,0.3374,0.2572,0.808,2.1235,4.3298
+frame,e0606b55,Cam hướng ra cửa,2,,,tracker_to_rgba_ms,490,0.2551,0.1869,0.645,1.2042,3.0886
+frame,e0606b55,Cam hướng ra cửa,3,2,1,copy_wall_ms,1,0.4354,0.4354,0.4354,0.4354,0.4354
+frame,e0606b55,Cam hướng ra cửa,3,2,1,decoder_cuda_ms,1,17.2092,17.2092,17.2092,17.2092,17.2092
+frame,e0606b55,Cam hướng ra cửa,3,2,1,encoder_cuda_ms,1,8.7849,8.7849,8.7849,8.7849,8.7849
+frame,e0606b55,Cam hướng ra cửa,3,2,1,identity_verify_cuda_ms,1,1.3122,1.3122,1.3122,1.3122,1.3122
+frame,e0606b55,Cam hướng ra cửa,3,2,1,memory_encode_cuda_ms,1,1.995,1.995,1.995,1.995,1.995
+frame,e0606b55,Cam hướng ra cửa,3,2,1,polygon_postprocess_host_ms,1,1.1472,1.1472,1.1472,1.1472,1.1472
+frame,e0606b55,Cam hướng ra cửa,3,2,1,queue_wait_ms,1,22.3243,22.3243,22.3243,22.3243,22.3243
+frame,e0606b55,Cam hướng ra cửa,3,2,1,segment_wall_ms,1,32.2064,32.2064,32.2064,32.2064,32.2064
+frame,e0606b55,Cam hướng ra cửa,3,2,1,t0_t1_ms,1,23.4234,23.4234,23.4234,23.4234,23.4234
+frame,e0606b55,Cam hướng ra cửa,3,2,1,t1_t2_last_ms,1,26.3116,26.3116,26.3116,26.3116,26.3116
+frame,e0606b55,Cam hướng ra cửa,3,2,1,tracker_to_rgba_ms,1,0.494,0.494,0.494,0.494,0.494
+frame,e0606b55,Cam hướng ra cửa,3,2,2,copy_wall_ms,5,0.3419,0.3677,0.4661,0.4661,0.4661
+frame,e0606b55,Cam hướng ra cửa,3,2,2,decoder_cuda_ms,5,22.9963,19.7863,36.2832,36.2832,36.2832
+frame,e0606b55,Cam hướng ra cửa,3,2,2,encoder_cuda_ms,5,8.8783,8.4527,11.1706,11.1706,11.1706
+frame,e0606b55,Cam hướng ra cửa,3,2,2,identity_verify_cuda_ms,5,1.9803,1.8588,2.8402,2.8402,2.8402
+frame,e0606b55,Cam hướng ra cửa,3,2,2,memory_encode_cuda_ms,5,2.4086,2.2976,3.0696,3.0696,3.0696
+frame,e0606b55,Cam hướng ra cửa,3,2,2,polygon_postprocess_host_ms,5,1.2758,1.2279,2.0766,2.0766,2.0766
+frame,e0606b55,Cam hướng ra cửa,3,2,2,queue_wait_ms,5,22.3042,24.5307,39.3623,39.3623,39.3623
+frame,e0606b55,Cam hướng ra cửa,3,2,2,segment_wall_ms,5,41.3978,39.1463,58.911,58.911,58.911
+frame,e0606b55,Cam hướng ra cửa,3,2,2,t0_t1_ms,5,23.0838,25.3475,40.0003,40.0003,40.0003
+frame,e0606b55,Cam hướng ra cửa,3,2,2,t1_t2_last_ms,5,35.1447,32.9703,50.8137,50.8137,50.8137
+frame,e0606b55,Cam hướng ra cửa,3,2,2,tracker_to_rgba_ms,5,0.252,0.2274,0.3384,0.3384,0.3384
+frame,e0606b55,Cam hướng ra cửa,3,3,1,copy_wall_ms,288,0.3595,0.2944,0.8189,1.4691,2.7161
+frame,e0606b55,Cam hướng ra cửa,3,3,1,decoder_cuda_ms,288,15.3458,14.4095,24.6632,27.1562,29.8009
+frame,e0606b55,Cam hướng ra cửa,3,3,1,encoder_cuda_ms,288,8.7833,8.2552,13.0558,16.9344,19.0494
+frame,e0606b55,Cam hướng ra cửa,3,3,1,identity_verify_cuda_ms,288,1.4199,1.1685,3.0226,6.0421,8.0657
+frame,e0606b55,Cam hướng ra cửa,3,3,1,memory_encode_cuda_ms,288,3.11,2.5463,5.8891,8.9609,10.8516
+frame,e0606b55,Cam hướng ra cửa,3,3,1,polygon_postprocess_host_ms,288,1.7275,1.1867,2.6608,3.5859,100.1014
+frame,e0606b55,Cam hướng ra cửa,3,3,1,queue_wait_ms,288,31.6563,23.7091,107.2735,157.1696,212.1105
+frame,e0606b55,Cam hướng ra cửa,3,3,1,segment_wall_ms,288,33.0424,31.6486,46.2568,57.772,148.7475
+frame,e0606b55,Cam hướng ra cửa,3,3,1,t0_t1_ms,288,32.4434,24.5176,108.3145,158.2446,212.8784
+frame,e0606b55,Cam hướng ra cửa,3,3,1,t1_t2_last_ms,288,24.7135,23.6421,36.4368,42.169,43.5726
+frame,e0606b55,Cam hướng ra cửa,3,3,1,tracker_to_rgba_ms,288,0.2675,0.1998,0.6872,1.0122,1.2191
+frame,e0606b55,Cam hướng ra cửa,3,3,2,copy_wall_ms,28,0.2915,0.2788,0.5634,0.5704,0.5704
+frame,e0606b55,Cam hướng ra cửa,3,3,2,decoder_cuda_ms,28,24.8054,22.637,35.1646,35.7596,35.7596
+frame,e0606b55,Cam hướng ra cửa,3,3,2,encoder_cuda_ms,28,8.0854,7.4108,10.6582,13.4149,13.4149
+frame,e0606b55,Cam hướng ra cửa,3,3,2,identity_verify_cuda_ms,28,2.9598,2.8102,4.3369,7.9074,7.9074
+frame,e0606b55,Cam hướng ra cửa,3,3,2,memory_encode_cuda_ms,28,3.3644,2.7381,6.9635,8.2835,8.2835
+frame,e0606b55,Cam hướng ra cửa,3,3,2,polygon_postprocess_host_ms,28,1.3337,1.2673,2.1526,2.5265,2.5265
+frame,e0606b55,Cam hướng ra cửa,3,3,2,queue_wait_ms,28,22.4438,16.9991,49.8679,105.1575,105.1575
+frame,e0606b55,Cam hướng ra cửa,3,3,2,segment_wall_ms,28,45.2939,41.1762,60.7712,67.496,67.496
+frame,e0606b55,Cam hướng ra cửa,3,3,2,t0_t1_ms,28,23.1016,17.7383,50.3211,105.7608,105.7608
+frame,e0606b55,Cam hướng ra cửa,3,3,2,t1_t2_last_ms,28,36.9147,33.9604,52.8113,53.057,53.057
+frame,e0606b55,Cam hướng ra cửa,3,3,2,tracker_to_rgba_ms,28,0.2205,0.1808,0.5031,0.5164,0.5164
+frame,e0606b55,Cam hướng ra cửa,3,3,3,copy_wall_ms,291,0.3563,0.2928,0.6897,1.8876,2.3962
+frame,e0606b55,Cam hướng ra cửa,3,3,3,decoder_cuda_ms,291,36.8667,34.2393,55.1302,63.4403,154.3449
+frame,e0606b55,Cam hướng ra cửa,3,3,3,encoder_cuda_ms,291,8.7864,8.3314,12.9946,16.197,18.4869
+frame,e0606b55,Cam hướng ra cửa,3,3,3,identity_verify_cuda_ms,291,4.3659,3.9761,7.221,12.2175,13.853
+frame,e0606b55,Cam hướng ra cửa,3,3,3,memory_encode_cuda_ms,291,3.1084,2.6589,6.0188,7.3931,10.4389
+frame,e0606b55,Cam hướng ra cửa,3,3,3,polygon_postprocess_host_ms,291,1.3852,1.235,2.4157,3.8756,5.9163
+frame,e0606b55,Cam hướng ra cửa,3,3,3,queue_wait_ms,291,25.755,22.4639,62.9167,103.3105,127.4897
+frame,e0606b55,Cam hướng ra cửa,3,3,3,segment_wall_ms,291,61.9699,59.4473,87.5021,96.2573,182.4573
+frame,e0606b55,Cam hướng ra cửa,3,3,3,t0_t1_ms,291,26.5586,23.2336,64.0311,106.0613,128.5032
+frame,e0606b55,Cam hướng ra cửa,3,3,3,t1_t2_last_ms,291,53.9664,51.7641,75.9069,87.4072,174.294
+frame,e0606b55,Cam hướng ra cửa,3,3,3,tracker_to_rgba_ms,291,0.2851,0.2128,0.7032,1.1955,2.6801
+frame,e0606b55,Cam hướng ra cửa,3,,,copy_wall_ms,1479,0.3943,0.2958,0.9672,2.1547,5.1939
+frame,e0606b55,Cam hướng ra cửa,3,,,tracker_to_rgba_ms,1938,0.2815,0.2047,0.6605,1.174,6.0057
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,cache_t3_ms,28,48.4929,20.2572,191.2184,222.5425,222.5425
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,decoder_cuda_ms,30,16.0945,14.3128,25.6013,25.7629,25.7629
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t0_t1_ms,30,38.4477,27.6782,128.8981,128.8981,128.8981
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t0_t3_ms,28,144.2788,114.9685,280.9235,280.9302,280.9302
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t1_t2_ms,30,49.2573,49.6234,89.6625,97.8431,97.8431
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t2_cache_ms,30,8.1701,8.1422,11.9409,14.2318,14.2318
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,3,t2_t3_ms,28,56.5886,30.5624,198.0134,229.8777,229.8777
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,cache_t3_ms,30,20.9758,18.9791,40.6065,52.5474,52.5474
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,decoder_cuda_ms,40,15.0502,13.4764,24.4831,30.682,30.682
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t0_t1_ms,40,25.0953,19.9749,69.1547,69.1547,69.1547
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t0_t3_ms,30,107.2483,114.9499,159.6455,159.6515,159.6515
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t1_t2_ms,40,63.9499,63.9984,113.1441,116.4891,116.4891
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t2_cache_ms,40,7.2866,6.4851,12.2878,12.6896,12.6896
+object,06e9e5b9,Cam góc rộng toàn sân,2,5,4,t2_t3_ms,30,29.0771,26.4299,52.0165,64.4443,64.4443
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,cache_t3_ms,3,15.2788,11.6534,27.7493,27.7493,27.7493
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,decoder_cuda_ms,4,12.4867,10.7766,18.6234,18.6234,18.6234
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t0_t1_ms,4,45.1699,45.1699,45.1699,45.1699,45.1699
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t0_t3_ms,3,114.8825,128.2076,128.2141,128.2141,128.2141
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t1_t2_ms,4,57.1705,49.9889,86.567,86.567,86.567
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t2_cache_ms,4,5.9508,5.2995,10.4341,10.4341,10.4341
+object,06e9e5b9,Cam góc rộng toàn sân,3,5,4,t2_t3_ms,3,22.3409,17.1061,33.0488,33.0488,33.0488
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,cache_t3_ms,306,29.7864,23.309,79.2675,197.296,232.3858
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,decoder_cuda_ms,318,14.8688,13.7962,24.8242,30.6895,33.8916
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t0_t1_ms,318,28.6673,23.4901,67.7722,126.6025,200.2932
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t0_t3_ms,306,111.2479,102.5948,273.1833,283.5742,295.6049
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t1_t2_ms,318,46.4713,44.3604,89.5737,103.2733,116.3547
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t2_cache_ms,318,7.1235,6.4704,12.32,14.164,29.3295
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,3,t2_t3_ms,306,36.8961,29.9208,85.4734,207.6698,243.1418
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,cache_t3_ms,275,32.6179,24.3971,123.4224,194.7564,242.5233
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,decoder_cuda_ms,376,13.9323,12.7274,24.785,27.6269,33.2044
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t0_t1_ms,376,28.727,20.2628,92.6973,144.8634,144.8634
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t0_t3_ms,275,115.021,94.0762,280.3671,288.6922,288.7017
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t1_t2_ms,376,56.8902,55.8748,103.0322,122.7917,157.3281
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t2_cache_ms,376,6.4095,5.8126,12.6019,15.0509,19.1493
+object,06e9e5b9,Cam góc rộng toàn sân,3,6,4,t2_t3_ms,275,40.1288,30.9467,131.8577,205.6374,252.3233
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,cache_t3_ms,4,21.8311,11.2307,40.4723,40.4723,40.4723
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,decoder_cuda_ms,6,15.4726,15.6211,20.2708,20.2708,20.2708
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t0_t1_ms,6,31.1326,14.5901,47.6751,47.6751,47.6751
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t0_t3_ms,4,96.1968,79.8917,140.2363,140.2363,140.2363
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t1_t2_ms,6,46.7645,43.6408,79.7709,79.7709,79.7709
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t2_cache_ms,6,6.4255,5.4029,8.5865,8.5865,8.5865
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,3,t2_t3_ms,4,29.1107,19.8172,45.8753,45.8753,45.8753
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,cache_t3_ms,21,23.2789,21.6436,42.756,53.7214,53.7214
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,decoder_cuda_ms,28,13.0512,11.4057,21.3401,21.6542,21.6542
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t0_t1_ms,28,29.9527,27.0149,57.5438,57.5438,57.5438
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t0_t3_ms,21,105.2995,106.8362,147.2737,194.8937,194.8937
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t1_t2_ms,28,54.5074,54.5255,94.2344,106.5084,106.5084
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t2_cache_ms,28,6.5262,5.4445,12.9575,14.4037,14.4037
+object,06e9e5b9,Cam góc rộng toàn sân,4,6,4,t2_t3_ms,21,30.7932,31.2779,49.6867,61.3773,61.3773
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,cache_t3_ms,804,36.7362,24.7049,142.0546,193.4309,247.5185
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,decoder_cuda_ms,819,14.5748,13.3318,23.9394,28.215,33.2346
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t0_t1_ms,819,31.9468,25.8823,101.7072,146.356,150.3329
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t0_t3_ms,804,121.0584,101.9723,280.2374,288.4916,295.3964
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t1_t2_ms,819,45.5791,43.1427,81.5416,98.5266,191.3547
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t2_cache_ms,819,7.1832,6.2698,11.8664,14.2211,128.5316
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,3,t2_t3_ms,804,43.938,31.184,148.9694,198.9642,252.8397
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,cache_t3_ms,779,32.8557,24.3816,126.8979,225.7124,258.6046
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,decoder_cuda_ms,1076,13.8796,12.9954,24.0172,28.803,35.5315
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t0_t1_ms,1076,24.8304,18.8292,60.2948,132.0471,227.2594
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t0_t3_ms,779,111.885,90.962,280.712,290.7717,368.3259
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t1_t2_ms,1076,57.9271,57.0865,105.7786,126.8861,160.56
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t2_cache_ms,1076,6.378,5.7243,12.1016,15.5799,27.8013
+object,06e9e5b9,Cam góc rộng toàn sân,4,7,4,t2_t3_ms,779,40.2349,31.0457,132.387,233.2682,262.9623
+object,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,decoder_cuda_ms,67,14.3093,13.9437,22.5871,24.5063,24.5063
+object,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,t0_t1_ms,67,23.1059,19.9035,49.5464,119.0971,119.0971
+object,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,t1_t2_ms,67,23.1335,22.558,32.3492,39.6707,39.6707
+object,1ac2ffac,Cam Dahua Ch2 Fixed,0,1,1,t2_cache_ms,15,0.3256,0.2501,1.7431,1.7431,1.7431
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,decoder_cuda_ms,138,10.9208,10.1136,17.9491,20.5813,25.6084
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,t0_t1_ms,138,30.928,23.3103,88.4089,192.9346,240.6164
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,t1_t2_ms,138,20.8172,19.8515,31.5273,32.4097,37.1183
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,1,1,t2_cache_ms,138,3.4493,3.0597,6.1982,8.8869,10.542
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,decoder_cuda_ms,21,16.9103,16.0001,25.3513,29.4399,29.4399
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,t0_t1_ms,21,18.8931,10.0819,54.2184,61.6705,61.6705
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,1,t1_t2_ms,21,26.0262,24.4704,34.7652,46.3201,46.3201
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,decoder_cuda_ms,62,13.0753,12.6476,22.0122,27.7131,27.7131
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,t0_t1_ms,62,23.2619,23.4846,54.9464,60.0313,60.0313
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,t1_t2_ms,62,30.4899,29.4437,45.0379,55.7207,55.7207
+object,1ac2ffac,Cam Dahua Ch2 Fixed,1,2,2,t2_cache_ms,31,3.2666,2.9688,5.7226,5.9869,5.9869
+object,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,decoder_cuda_ms,4,12.2878,9.0831,19.7413,19.7413,19.7413
+object,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,t0_t1_ms,4,30.2576,26.5698,49.6313,49.6313,49.6313
+object,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,t1_t2_ms,4,23.5462,21.5262,29.964,29.964,29.964
+object,1ac2ffac,Cam Dahua Ch2 Fixed,2,2,1,t2_cache_ms,4,4.1704,4.2437,5.2793,5.2793,5.2793
+object,b1269e28,Cam 4,4,7,3,cache_t3_ms,93,35.0656,29.0458,82.7503,131.0824,131.0824
+object,b1269e28,Cam 4,4,7,3,decoder_cuda_ms,93,16.3774,15.3337,24.5405,28.8326,28.8326
+object,b1269e28,Cam 4,4,7,3,t0_t1_ms,93,39.0445,33.8243,98.5329,143.0993,143.0993
+object,b1269e28,Cam 4,4,7,3,t0_t3_ms,93,135.6305,137.0788,196.7306,242.691,242.691
+object,b1269e28,Cam 4,4,7,3,t1_t2_ms,93,52.741,49.6289,94.5089,127.2295,127.2295
+object,b1269e28,Cam 4,4,7,3,t2_cache_ms,93,8.7794,7.82,14.0804,25.9612,25.9612
+object,b1269e28,Cam 4,4,7,3,t2_t3_ms,93,43.845,38.0381,95.1677,140.8516,140.8516
+object,b1269e28,Cam 4,4,7,5,cache_t3_ms,81,34.6546,29.9904,78.1735,119.359,119.359
+object,b1269e28,Cam 4,4,7,5,decoder_cuda_ms,135,13.7783,13.3875,22.99,25.851,28.4465
+object,b1269e28,Cam 4,4,7,5,t0_t1_ms,135,25.1451,20.2645,58.4025,72.995,72.995
+object,b1269e28,Cam 4,4,7,5,t0_t3_ms,81,118.6196,120.3774,194.4895,210.5863,210.5863
+object,b1269e28,Cam 4,4,7,5,t1_t2_ms,135,71.6424,71.6023,129.4704,154.0725,155.2754
+object,b1269e28,Cam 4,4,7,5,t2_cache_ms,135,7.0227,6.7216,15.0773,21.3812,22.4081
+object,b1269e28,Cam 4,4,7,5,t2_t3_ms,81,43.4568,38.5455,90.4296,134.4364,134.4364
+object,b1269e28,Cam 4,4,8,4,cache_t3_ms,1620,31.7655,28.0183,75.014,101.5958,214.3216
+object,b1269e28,Cam 4,4,8,4,decoder_cuda_ms,1636,14.5896,13.3368,23.7342,27.685,34.6754
+object,b1269e28,Cam 4,4,8,4,t0_t1_ms,1636,34.807,30.669,78.7425,120.5678,192.3705
+object,b1269e28,Cam 4,4,8,4,t0_t3_ms,1620,130.4603,125.9237,201.7701,273.1092,366.5725
+object,b1269e28,Cam 4,4,8,4,t1_t2_ms,1636,56.4648,54.5694,105.1119,125.9994,287.3398
+object,b1269e28,Cam 4,4,8,4,t2_cache_ms,1628,7.3059,6.4872,12.1858,15.0395,208.4684
+object,b1269e28,Cam 4,4,8,4,t2_t3_ms,1620,39.0756,34.5354,83.0119,109.0197,224.8452
+object,b1269e28,Cam 4,4,8,6,cache_t3_ms,1325,32.9411,28.1897,78.0806,116.5268,198.6657
+object,b1269e28,Cam 4,4,8,6,decoder_cuda_ms,1998,13.0046,12.1971,22.5176,26.6624,114.8456
+object,b1269e28,Cam 4,4,8,6,t0_t1_ms,1998,27.94,21.2987,71.8461,121.7255,133.4553
+object,b1269e28,Cam 4,4,8,6,t0_t3_ms,1325,126.3032,121.9667,203.6517,274.2219,325.5585
+object,b1269e28,Cam 4,4,8,6,t1_t2_ms,1998,77.1059,77.6749,140.7436,168.5777,237.8362
+object,b1269e28,Cam 4,4,8,6,t2_cache_ms,1993,6.0901,5.5155,11.7812,14.4954,126.6409
+object,b1269e28,Cam 4,4,8,6,t2_t3_ms,1325,40.4526,34.907,86.2861,129.7081,208.8236
+object,b1269e28,Cam 4,4,8,,decoder_cuda_ms,1,12.5535,12.5535,12.5535,12.5535,12.5535
+object,b1269e28,Cam 4,4,8,,t0_t1_ms,1,13.4697,13.4697,13.4697,13.4697,13.4697
+object,b1269e28,Cam 4,4,8,,t1_t2_ms,1,23.2823,23.2823,23.2823,23.2823,23.2823
+object,b1269e28,Cam 4,4,8,,t2_cache_ms,1,9.6825,9.6825,9.6825,9.6825,9.6825
+object,b1269e28,Cam 4,5,8,4,cache_t3_ms,20,41.4597,33.4396,82.2869,96.5254,96.5254
+object,b1269e28,Cam 4,5,8,4,decoder_cuda_ms,20,14.1886,12.8039,22.9346,23.3982,23.3982
+object,b1269e28,Cam 4,5,8,4,t0_t1_ms,20,33.0953,29.9177,49.3115,49.3115,49.3115
+object,b1269e28,Cam 4,5,8,4,t0_t3_ms,20,145.1452,151.2016,189.6278,199.3654,199.3654
+object,b1269e28,Cam 4,5,8,4,t1_t2_ms,20,61.7675,63.091,113.6278,123.0178,123.0178
+object,b1269e28,Cam 4,5,8,4,t2_cache_ms,20,8.8227,8.2887,14.6181,15.1648,15.1648
+object,b1269e28,Cam 4,5,8,4,t2_t3_ms,20,50.2824,41.422,86.3578,104.8141,104.8141
+object,b1269e28,Cam 4,5,8,6,cache_t3_ms,16,30.3515,25.8935,68.5312,68.5312,68.5312
+object,b1269e28,Cam 4,5,8,6,decoder_cuda_ms,24,13.1917,13.6943,21.2515,22.6215,22.6215
+object,b1269e28,Cam 4,5,8,6,t0_t1_ms,24,27.6951,7.2305,82.076,82.076,82.076
+object,b1269e28,Cam 4,5,8,6,t0_t3_ms,16,126.7386,107.0961,280.3296,280.3296,280.3296
+object,b1269e28,Cam 4,5,8,6,t1_t2_ms,24,80.4815,85.7723,136.6851,150.5679,150.5679
+object,b1269e28,Cam 4,5,8,6,t2_cache_ms,24,6.5692,6.4211,12.0983,12.7514,12.7514
+object,b1269e28,Cam 4,5,8,6,t2_t3_ms,16,38.0858,32.1883,77.2405,77.2405,77.2405
+object,b1269e28,Cam 4,5,9,4,cache_t3_ms,104,31.5357,26.3361,72.4082,82.0686,124.3924
+object,b1269e28,Cam 4,5,9,4,decoder_cuda_ms,104,14.4007,13.8762,23.4819,24.9983,28.68
+object,b1269e28,Cam 4,5,9,4,t0_t1_ms,104,31.4321,26.3521,74.1099,82.183,82.183
+object,b1269e28,Cam 4,5,9,4,t0_t3_ms,104,127.104,121.337,203.9858,239.4887,246.3243
+object,b1269e28,Cam 4,5,9,4,t1_t2_ms,104,56.6689,54.2245,105.9654,127.6959,135.8845
+object,b1269e28,Cam 4,5,9,4,t2_cache_ms,104,7.4673,6.9114,12.5069,15.0177,15.3417
+object,b1269e28,Cam 4,5,9,4,t2_t3_ms,104,39.003,32.9227,78.1967,92.4072,134.3413
+object,b1269e28,Cam 4,5,9,5,cache_t3_ms,52,31.1352,31.247,74.7562,86.9481,86.9481
+object,b1269e28,Cam 4,5,9,5,decoder_cuda_ms,65,16.1799,15.0491,26.5583,28.4179,28.4179
+object,b1269e28,Cam 4,5,9,5,t0_t1_ms,65,36.752,40.1809,78.2884,78.2884,78.2884
+object,b1269e28,Cam 4,5,9,5,t0_t3_ms,52,140.8817,130.9191,205.3714,280.0133,280.0133
+object,b1269e28,Cam 4,5,9,5,t1_t2_ms,65,76.5084,76.3595,134.3539,171.5276,171.5276
+object,b1269e28,Cam 4,5,9,5,t2_cache_ms,65,7.9422,7.9479,12.9041,15.5198,15.5198
+object,b1269e28,Cam 4,5,9,5,t2_t3_ms,52,39.8551,39.7069,81.1792,92.8733,92.8733
+object,b1269e28,Cam 4,5,9,6,cache_t3_ms,76,28.2839,27.6803,64.8231,70.0837,70.0837
+object,b1269e28,Cam 4,5,9,6,decoder_cuda_ms,114,14.5583,13.7906,24.4216,27.6897,28.6996
+object,b1269e28,Cam 4,5,9,6,t0_t1_ms,114,28.7335,22.2136,121.889,121.889,121.889
+object,b1269e28,Cam 4,5,9,6,t0_t3_ms,76,128.1878,121.4125,203.6369,239.092,239.092
+object,b1269e28,Cam 4,5,9,6,t1_t2_ms,114,84.8651,83.4424,158.7082,186.3528,188.1508
+object,b1269e28,Cam 4,5,9,6,t2_cache_ms,114,6.7539,6.0965,12.6933,17.2858,18.0432
+object,b1269e28,Cam 4,5,9,6,t2_t3_ms,76,36.513,33.6751,74.1901,79.6054,79.6054
+object,b1269e28,Cam 4,5,9,7,cache_t3_ms,116,31.3266,28.7213,73.3603,84.1243,86.5877
+object,b1269e28,Cam 4,5,9,7,decoder_cuda_ms,203,13.1896,12.7716,22.8811,25.1561,29.4845
+object,b1269e28,Cam 4,5,9,7,t0_t1_ms,203,25.9234,13.9285,74.2197,115.3438,115.3438
+object,b1269e28,Cam 4,5,9,7,t0_t3_ms,116,127.2403,122.9348,210.2805,230.1246,249.6019
+object,b1269e28,Cam 4,5,9,7,t1_t2_ms,203,90.9675,91.8566,165.2147,182.7665,208.5257
+object,b1269e28,Cam 4,5,9,7,t2_cache_ms,203,6.1502,5.2692,13.3327,14.8875,22.0915
+object,b1269e28,Cam 4,5,9,7,t2_t3_ms,116,39.3912,34.9576,79.713,92.7513,92.9235
+object,c7e22c1f,Cam mới,1,1,1,cache_t3_ms,31,30.4415,19.383,50.1548,238.5206,238.5206
+object,c7e22c1f,Cam mới,1,1,1,decoder_cuda_ms,31,16.1706,16.1668,24.5691,26.6946,26.6946
+object,c7e22c1f,Cam mới,1,1,1,t0_t1_ms,31,28.8054,27.174,68.9226,72.1291,72.1291
+object,c7e22c1f,Cam mới,1,1,1,t0_t3_ms,31,93.1104,80.6739,158.2149,320.8903,320.8903
+object,c7e22c1f,Cam mới,1,1,1,t1_t2_ms,31,25.7194,24.3861,36.9303,37.9116,37.9116
+object,c7e22c1f,Cam mới,1,1,1,t2_cache_ms,31,8.1441,7.6639,13.2747,15.6689,15.6689
+object,c7e22c1f,Cam mới,1,1,1,t2_t3_ms,31,38.5856,29.5311,61.2396,244.8057,244.8057
+object,c7e22c1f,Cam mới,2,1,1,cache_t3_ms,4,16.715,6.4504,32.5917,32.5917,32.5917
+object,c7e22c1f,Cam mới,2,1,1,decoder_cuda_ms,4,14.8887,10.8959,21.1885,21.1885,21.1885
+object,c7e22c1f,Cam mới,2,1,1,t0_t1_ms,4,11.3099,10.5608,17.0987,17.0987,17.0987
+object,c7e22c1f,Cam mới,2,1,1,t0_t3_ms,4,59.4667,42.9976,82.5751,82.5751,82.5751
+object,c7e22c1f,Cam mới,2,1,1,t1_t2_ms,4,22.3398,17.0101,31.3816,31.3816,31.3816
+object,c7e22c1f,Cam mới,2,1,1,t2_cache_ms,4,9.102,10.2689,10.4093,10.4093,10.4093
+object,c7e22c1f,Cam mới,2,1,1,t2_t3_ms,4,25.8169,16.8444,37.9272,37.9272,37.9272
+object,c7e22c1f,Cam mới,2,2,1,cache_t3_ms,113,26.0402,24.6667,49.0278,110.8339,159.9325
+object,c7e22c1f,Cam mới,2,2,1,decoder_cuda_ms,114,14.8788,13.8546,23.0771,28.3252,28.6276
+object,c7e22c1f,Cam mới,2,2,1,t0_t1_ms,114,26.7194,21.2051,66.8578,116.9425,117.3633
+object,c7e22c1f,Cam mới,2,2,1,t0_t3_ms,113,85.4304,82.8544,167.4504,225.8854,243.1292
+object,c7e22c1f,Cam mới,2,2,1,t1_t2_ms,114,24.0444,22.3994,35.4722,39.5564,39.9686
+object,c7e22c1f,Cam mới,2,2,1,t2_cache_ms,114,8.4805,7.292,12.4663,19.7356,106.4789
+object,c7e22c1f,Cam mới,2,2,1,t2_t3_ms,113,34.505,32.2322,60.561,135.3752,169.5851
+object,c7e22c1f,Cam mới,2,2,2,cache_t3_ms,236,25.9662,22.1827,55.09,102.8886,118.6761
+object,c7e22c1f,Cam mới,2,2,2,decoder_cuda_ms,336,14.0036,12.9756,24.4284,28.6804,30.9549
+object,c7e22c1f,Cam mới,2,2,2,t0_t1_ms,336,26.3913,25.0997,59.0044,100.858,113.1639
+object,c7e22c1f,Cam mới,2,2,2,t0_t3_ms,236,95.4036,86.9765,150.233,185.3103,185.5923
+object,c7e22c1f,Cam mới,2,2,2,t1_t2_ms,336,33.5444,32.4787,58.5837,67.8511,70.2094
+object,c7e22c1f,Cam mới,2,2,2,t2_cache_ms,336,6.6431,6.03,12.4744,17.203,18.8578
+object,c7e22c1f,Cam mới,2,2,2,t2_t3_ms,236,33.7307,30.0201,65.5849,107.5645,126.0166
+object,c7e22c1f,Cam mới,3,2,1,cache_t3_ms,4,26.4141,25.4548,34.3787,34.3787,34.3787
+object,c7e22c1f,Cam mới,3,2,1,decoder_cuda_ms,4,17.9564,16.287,24.8658,24.8658,24.8658
+object,c7e22c1f,Cam mới,3,2,1,t0_t1_ms,4,21.3141,24.3779,29.8119,29.8119,29.8119
+object,c7e22c1f,Cam mới,3,2,1,t0_t3_ms,4,82.6326,79.4656,91.6841,91.6841,91.6841
+object,c7e22c1f,Cam mới,3,2,1,t1_t2_ms,4,25.9993,25.7202,33.0528,33.0528,33.0528
+object,c7e22c1f,Cam mới,3,2,1,t2_cache_ms,4,8.9051,8.7216,11.6662,11.6662,11.6662
+object,c7e22c1f,Cam mới,3,2,1,t2_t3_ms,4,35.3193,31.5194,43.1003,43.1003,43.1003
+object,c7e22c1f,Cam mới,3,2,2,cache_t3_ms,3,41.6095,55.8032,68.8139,68.8139,68.8139
+object,c7e22c1f,Cam mới,3,2,2,decoder_cuda_ms,6,15.4343,11.5494,27.9944,27.9944,27.9944
+object,c7e22c1f,Cam mới,3,2,2,t0_t1_ms,6,20.8025,16.3801,31.3682,31.3682,31.3682
+object,c7e22c1f,Cam mới,3,2,2,t0_t3_ms,3,108.1286,112.0144,124.8482,124.8482,124.8482
+object,c7e22c1f,Cam mới,3,2,2,t1_t2_ms,6,33.1669,26.0209,49.8881,49.8881,49.8881
+object,c7e22c1f,Cam mới,3,2,2,t2_cache_ms,6,4.7474,3.84,7.6124,7.6124,7.6124
+object,c7e22c1f,Cam mới,3,2,2,t2_t3_ms,3,48.2725,63.4156,75.135,75.135,75.135
+object,c7e22c1f,Cam mới,3,3,1,cache_t3_ms,204,24.695,22.0713,47.7776,93.5964,112.2602
+object,c7e22c1f,Cam mới,3,3,1,decoder_cuda_ms,215,14.753,13.6482,23.9143,28.1663,30.2032
+object,c7e22c1f,Cam mới,3,3,1,t0_t1_ms,215,26.2813,24.2952,66.262,86.6872,108.963
+object,c7e22c1f,Cam mới,3,3,1,t0_t3_ms,204,82.7152,82.021,128.0871,161.5081,197.3025
+object,c7e22c1f,Cam mới,3,3,1,t1_t2_ms,215,23.9412,22.3617,35.2194,38.6623,42.1157
+object,c7e22c1f,Cam mới,3,3,1,t2_cache_ms,215,7.3632,6.8328,12.0215,13.3637,16.9931
+object,c7e22c1f,Cam mới,3,3,1,t2_t3_ms,204,32.0679,29.2263,56.9563,98.0243,118.8511
+object,c7e22c1f,Cam mới,3,3,2,cache_t3_ms,192,25.3008,22.1898,50.7847,99.711,118.168
+object,c7e22c1f,Cam mới,3,3,2,decoder_cuda_ms,264,13.11,12.3476,22.3053,26.421,30.0088
+object,c7e22c1f,Cam mới,3,3,2,t0_t1_ms,264,27.2331,23.7669,64.627,101.2012,104.3731
+object,c7e22c1f,Cam mới,3,3,2,t0_t3_ms,192,92.2269,84.1075,157.9574,192.9696,192.9787
+object,c7e22c1f,Cam mới,3,3,2,t1_t2_ms,264,32.0797,31.1165,52.6832,63.9424,70.2867
+object,c7e22c1f,Cam mới,3,3,2,t2_cache_ms,264,5.7195,5.2571,10.6684,14.147,15.5318
+object,c7e22c1f,Cam mới,3,3,2,t2_t3_ms,192,31.9979,28.2029,57.7447,107.9431,128.8365
+object,c7e22c1f,Cam mới,3,3,3,cache_t3_ms,261,25.6214,23.8807,54.4596,96.2433,127.7419
+object,c7e22c1f,Cam mới,3,3,3,decoder_cuda_ms,636,12.1064,10.7558,21.4402,26.6736,121.9032
+object,c7e22c1f,Cam mới,3,3,3,t0_t1_ms,636,24.2167,22.2751,55.9248,71.3548,101.4755
+object,c7e22c1f,Cam mới,3,3,3,t0_t3_ms,261,98.7586,88.0556,156.9603,198.6789,204.1961
+object,c7e22c1f,Cam mới,3,3,3,t1_t2_ms,636,38.2068,35.8966,70.8972,96.6436,152.7852
+object,c7e22c1f,Cam mới,3,3,3,t2_cache_ms,636,5.0118,4.2913,11.2273,16.1527,24.1902
+object,c7e22c1f,Cam mới,3,3,3,t2_t3_ms,261,32.8463,30.9902,65.6299,102.4519,141.0438
+object,c7e22c1f,Cam mới,3,3,,decoder_cuda_ms,2,14.6054,11.45,17.7609,17.7609,17.7609
+object,c7e22c1f,Cam mới,3,3,,t0_t1_ms,2,11.5578,11.5578,11.5578,11.5578,11.5578
+object,c7e22c1f,Cam mới,3,3,,t1_t2_ms,2,33.7183,22.5151,44.9214,44.9214,44.9214
+object,c7e22c1f,Cam mới,3,3,,t2_cache_ms,2,7.9845,4.7541,11.2149,11.2149,11.2149
+object,c7e22c1f,Cam mới,4,4,1,cache_t3_ms,1,35.4485,35.4485,35.4485,35.4485,35.4485
+object,c7e22c1f,Cam mới,4,4,1,decoder_cuda_ms,1,11.9166,11.9166,11.9166,11.9166,11.9166
+object,c7e22c1f,Cam mới,4,4,1,t0_t1_ms,1,23.7828,23.7828,23.7828,23.7828,23.7828
+object,c7e22c1f,Cam mới,4,4,1,t0_t3_ms,1,87.4979,87.4979,87.4979,87.4979,87.4979
+object,c7e22c1f,Cam mới,4,4,1,t1_t2_ms,1,18.438,18.438,18.438,18.438,18.438
+object,c7e22c1f,Cam mới,4,4,1,t2_cache_ms,1,9.8286,9.8286,9.8286,9.8286,9.8286
+object,c7e22c1f,Cam mới,4,4,1,t2_t3_ms,1,45.2771,45.2771,45.2771,45.2771,45.2771
+object,c7e22c1f,Cam mới,4,4,2,cache_t3_ms,6,20.8856,8.6086,44.4097,44.4097,44.4097
+object,c7e22c1f,Cam mới,4,4,2,decoder_cuda_ms,12,13.6286,11.7443,24.7484,24.7484,24.7484
+object,c7e22c1f,Cam mới,4,4,2,t0_t1_ms,12,19.3076,8.6706,42.1275,42.1275,42.1275
+object,c7e22c1f,Cam mới,4,4,2,t0_t3_ms,6,73.9863,75.9664,109.9872,109.9872,109.9872
+object,c7e22c1f,Cam mới,4,4,2,t1_t2_ms,12,35.6504,34.4841,62.6961,62.6961,62.6961
+object,c7e22c1f,Cam mới,4,4,2,t2_cache_ms,12,5.4489,4.491,13.7083,13.7083,13.7083
+object,c7e22c1f,Cam mới,4,4,2,t2_t3_ms,6,28.433,14.3439,55.2888,55.2888,55.2888
+object,c7e22c1f,Cam mới,4,4,3,cache_t3_ms,5,12.5054,14.9601,21.4732,21.4732,21.4732
+object,c7e22c1f,Cam mới,4,4,3,decoder_cuda_ms,15,12.9924,10.8306,28.6243,28.6243,28.6243
+object,c7e22c1f,Cam mới,4,4,3,t0_t1_ms,15,33.0285,34.2851,60.2347,60.2347,60.2347
+object,c7e22c1f,Cam mới,4,4,3,t0_t3_ms,5,94.7675,88.3103,119.8382,119.8382,119.8382
+object,c7e22c1f,Cam mới,4,4,3,t1_t2_ms,15,41.9548,37.0903,88.6741,88.6741,88.6741
+object,c7e22c1f,Cam mới,4,4,3,t2_cache_ms,15,4.4075,3.6804,8.8719,8.8719,8.8719
+object,c7e22c1f,Cam mới,4,4,3,t2_t3_ms,5,19.0852,23.832,25.9309,25.9309,25.9309
+object,c7e22c1f,Cam mới,4,4,4,cache_t3_ms,1,128.3044,128.3044,128.3044,128.3044,128.3044
+object,c7e22c1f,Cam mới,4,4,4,decoder_cuda_ms,4,16.5518,13.4407,31.3981,31.3981,31.3981
+object,c7e22c1f,Cam mới,4,4,4,t0_t1_ms,4,36.2393,36.2393,36.2393,36.2393,36.2393
+object,c7e22c1f,Cam mới,4,4,4,t0_t3_ms,1,250.0128,250.0128,250.0128,250.0128,250.0128
+object,c7e22c1f,Cam mới,4,4,4,t1_t2_ms,4,80.964,74.425,110.8078,110.8078,110.8078
+object,c7e22c1f,Cam mới,4,4,4,t2_cache_ms,4,5.2481,2.7544,11.0442,11.0442,11.0442
+object,c7e22c1f,Cam mới,4,4,4,t2_t3_ms,1,139.3485,139.3485,139.3485,139.3485,139.3485
+object,d1f37ed1,Cam hik 1,1,1,1,decoder_cuda_ms,135,9.9895,8.9715,17.6166,20.4549,21.2343
+object,d1f37ed1,Cam hik 1,1,1,1,t0_t1_ms,135,29.7722,24.1355,105.2469,150.6031,170.3334
+object,d1f37ed1,Cam hik 1,1,1,1,t1_t2_ms,135,19.0045,17.81,29.225,32.2643,32.6941
+object,d1f37ed1,Cam hik 1,1,1,1,t2_cache_ms,135,3.2582,2.9202,6.3245,7.8572,8.4436
+object,d1f37ed1,Cam hik 1,1,2,1,cache_t3_ms,97,34.2997,23.7407,123.9983,229.9111,229.9111
+object,d1f37ed1,Cam hik 1,1,2,1,decoder_cuda_ms,129,15.3413,14.6437,23.6797,27.9641,29.586
+object,d1f37ed1,Cam hik 1,1,2,1,t0_t1_ms,129,34.1296,22.9932,145.9448,181.9297,191.6297
+object,d1f37ed1,Cam hik 1,1,2,1,t0_t3_ms,97,101.0326,82.7617,281.836,291.6138,291.6138
+object,d1f37ed1,Cam hik 1,1,2,1,t1_t2_ms,129,24.8521,24.743,35.4075,39.0143,44.6545
+object,d1f37ed1,Cam hik 1,1,2,1,t2_cache_ms,99,8.3699,7.9609,12.9885,19.4206,19.4206
+object,d1f37ed1,Cam hik 1,1,2,1,t2_t3_ms,97,42.693,32.5652,129.9888,238.9594,238.9594
+object,d1f37ed1,Cam hik 1,1,2,2,cache_t3_ms,112,33.0051,25.4848,131.1133,225.2255,230.4414
+object,d1f37ed1,Cam hik 1,1,2,2,decoder_cuda_ms,282,12.1893,11.8019,20.4051,24.1435,29.079
+object,d1f37ed1,Cam hik 1,1,2,2,t0_t1_ms,282,25.9773,20.1214,54.8682,183.678,246.624
+object,d1f37ed1,Cam hik 1,1,2,2,t0_t3_ms,112,90.784,80.2802,281.6118,290.0303,320.8146
+object,d1f37ed1,Cam hik 1,1,2,2,t1_t2_ms,282,33.08,30.6946,54.7795,63.7183,153.5632
+object,d1f37ed1,Cam hik 1,1,2,2,t2_cache_ms,257,6.0105,4.611,13.0418,15.9183,125.0584
+object,d1f37ed1,Cam hik 1,1,2,2,t2_t3_ms,112,41.35,33.8793,137.5079,239.0641,240.7015
+object,d1f37ed1,Cam hik 1,2,2,1,cache_t3_ms,1,24.1755,24.1755,24.1755,24.1755,24.1755
+object,d1f37ed1,Cam hik 1,2,2,1,decoder_cuda_ms,5,8.5948,8.246,10.8819,10.8819,10.8819
+object,d1f37ed1,Cam hik 1,2,2,1,t0_t1_ms,5,17.2243,12.5702,29.1921,29.1921,29.1921
+object,d1f37ed1,Cam hik 1,2,2,1,t0_t3_ms,1,82.6785,82.6785,82.6785,82.6785,82.6785
+object,d1f37ed1,Cam hik 1,2,2,1,t1_t2_ms,5,17.9265,16.9801,22.4332,22.4332,22.4332
+object,d1f37ed1,Cam hik 1,2,2,1,t2_cache_ms,5,3.8192,2.8128,7.7587,7.7587,7.7587
+object,d1f37ed1,Cam hik 1,2,2,1,t2_t3_ms,1,31.9342,31.9342,31.9342,31.9342,31.9342
+object,d1f37ed1,Cam hik 1,2,2,2,cache_t3_ms,5,24.7035,26.1917,36.6847,36.6847,36.6847
+object,d1f37ed1,Cam hik 1,2,2,2,decoder_cuda_ms,14,10.806,10.1045,17.5694,17.5694,17.5694
+object,d1f37ed1,Cam hik 1,2,2,2,t0_t1_ms,14,21.6051,27.7893,31.8957,31.8957,31.8957
+object,d1f37ed1,Cam hik 1,2,2,2,t0_t3_ms,5,76.1923,78.3914,90.1397,90.1397,90.1397
+object,d1f37ed1,Cam hik 1,2,2,2,t1_t2_ms,14,30.6688,28.4996,50.8499,50.8499,50.8499
+object,d1f37ed1,Cam hik 1,2,2,2,t2_cache_ms,14,4.4124,2.8172,11.1451,11.1451,11.1451
+object,d1f37ed1,Cam hik 1,2,2,2,t2_t3_ms,5,32.2768,34.1975,44.1504,44.1504,44.1504
+object,d1f37ed1,Cam hik 1,2,3,1,cache_t3_ms,71,39.9921,21.8207,184.5341,224.4288,224.4288
+object,d1f37ed1,Cam hik 1,2,3,1,decoder_cuda_ms,71,15.2776,14.446,27.916,30.1468,30.1468
+object,d1f37ed1,Cam hik 1,2,3,1,t0_t1_ms,71,31.0911,27.3537,95.6444,138.9881,138.9881
+object,d1f37ed1,Cam hik 1,2,3,1,t0_t3_ms,71,105.878,82.2272,279.4348,296.1623,296.1623
+object,d1f37ed1,Cam hik 1,2,3,1,t1_t2_ms,71,24.5672,23.4455,40.124,43.5337,43.5337
+object,d1f37ed1,Cam hik 1,2,3,1,t2_cache_ms,71,10.2276,6.7732,12.048,211.8382,211.8382
+object,d1f37ed1,Cam hik 1,2,3,1,t2_t3_ms,71,50.2197,29.019,206.3997,227.8616,227.8616
+object,d1f37ed1,Cam hik 1,2,3,2,cache_t3_ms,81,37.5047,25.3937,170.0422,243.9421,243.9421
+object,d1f37ed1,Cam hik 1,2,3,2,decoder_cuda_ms,166,12.5933,11.9028,22.3424,27.0736,27.4592
+object,d1f37ed1,Cam hik 1,2,3,2,t0_t1_ms,166,27.5198,21.5611,75.6672,144.173,144.173
+object,d1f37ed1,Cam hik 1,2,3,2,t0_t3_ms,81,98.1093,81.976,274.0953,292.358,292.358
+object,d1f37ed1,Cam hik 1,2,3,2,t1_t2_ms,166,34.7476,33.5789,58.36,70.0769,72.3913
+object,d1f37ed1,Cam hik 1,2,3,2,t2_cache_ms,166,6.0992,5.0994,13.6251,16.8506,16.8675
+object,d1f37ed1,Cam hik 1,2,3,2,t2_t3_ms,81,46.1166,33.2599,174.5911,257.5024,257.5024
+object,d1f37ed1,Cam hik 1,2,3,3,cache_t3_ms,4,18.07,15.8439,31.6133,31.6133,31.6133
+object,d1f37ed1,Cam hik 1,2,3,3,decoder_cuda_ms,12,13.2579,12.6652,26.9056,26.9056,26.9056
+object,d1f37ed1,Cam hik 1,2,3,3,t0_t1_ms,12,25.2971,18.8815,43.4791,43.4791,43.4791
+object,d1f37ed1,Cam hik 1,2,3,3,t0_t3_ms,4,80.0314,74.5969,89.9988,89.9988,89.9988
+object,d1f37ed1,Cam hik 1,2,3,3,t1_t2_ms,12,45.4249,40.079,81.1253,81.1253,81.1253
+object,d1f37ed1,Cam hik 1,2,3,3,t2_cache_ms,12,4.9867,3.5869,9.7885,9.7885,9.7885
+object,d1f37ed1,Cam hik 1,2,3,3,t2_t3_ms,4,25.7016,21.3818,39.875,39.875,39.875
+object,d1f37ed1,Cam hik 1,3,3,1,cache_t3_ms,1,24.5048,24.5048,24.5048,24.5048,24.5048
+object,d1f37ed1,Cam hik 1,3,3,1,decoder_cuda_ms,2,19.8552,15.5595,24.1508,24.1508,24.1508
+object,d1f37ed1,Cam hik 1,3,3,1,t0_t1_ms,2,39.4448,14.2981,64.5915,64.5915,64.5915
+object,d1f37ed1,Cam hik 1,3,3,1,t0_t3_ms,1,77.9671,77.9671,77.9671,77.9671,77.9671
+object,d1f37ed1,Cam hik 1,3,3,1,t1_t2_ms,2,28.6249,25.1705,32.0794,32.0794,32.0794
+object,d1f37ed1,Cam hik 1,3,3,1,t2_cache_ms,2,7.1431,7.0848,7.2014,7.2014,7.2014
+object,d1f37ed1,Cam hik 1,3,3,1,t2_t3_ms,1,31.5896,31.5896,31.5896,31.5896,31.5896
+object,d1f37ed1,Cam hik 1,3,3,3,cache_t3_ms,2,12.654,7.4651,17.8429,17.8429,17.8429
+object,d1f37ed1,Cam hik 1,3,3,3,decoder_cuda_ms,6,9.0597,8.3476,11.838,11.838,11.838
+object,d1f37ed1,Cam hik 1,3,3,3,t0_t1_ms,6,10.3049,7.5415,13.0684,13.0684,13.0684
+object,d1f37ed1,Cam hik 1,3,3,3,t0_t3_ms,2,43.2175,41.2637,45.1713,45.1713,45.1713
+object,d1f37ed1,Cam hik 1,3,3,3,t1_t2_ms,6,29.0881,26.6785,45.6761,45.6761,45.6761
+object,d1f37ed1,Cam hik 1,3,3,3,t2_cache_ms,6,3.5999,2.3109,6.2925,6.2925,6.2925
+object,d1f37ed1,Cam hik 1,3,3,3,t2_t3_ms,2,18.4423,13.7575,23.127,23.127,23.127
+object,d1f37ed1,Cam hik 1,3,4,1,cache_t3_ms,1,16.8245,16.8245,16.8245,16.8245,16.8245
+object,d1f37ed1,Cam hik 1,3,4,1,decoder_cuda_ms,1,23.0229,23.0229,23.0229,23.0229,23.0229
+object,d1f37ed1,Cam hik 1,3,4,1,t0_t1_ms,1,31.0421,31.0421,31.0421,31.0421,31.0421
+object,d1f37ed1,Cam hik 1,3,4,1,t0_t3_ms,1,89.4952,89.4952,89.4952,89.4952,89.4952
+object,d1f37ed1,Cam hik 1,3,4,1,t1_t2_ms,1,33.6956,33.6956,33.6956,33.6956,33.6956
+object,d1f37ed1,Cam hik 1,3,4,1,t2_cache_ms,1,7.9329,7.9329,7.9329,7.9329,7.9329
+object,d1f37ed1,Cam hik 1,3,4,1,t2_t3_ms,1,24.7574,24.7574,24.7574,24.7574,24.7574
+object,d1f37ed1,Cam hik 1,3,4,3,cache_t3_ms,2,17.1669,3.6152,30.7187,30.7187,30.7187
+object,d1f37ed1,Cam hik 1,3,4,3,decoder_cuda_ms,9,11.0833,10.9434,18.7993,18.7993,18.7993
+object,d1f37ed1,Cam hik 1,3,4,3,t0_t1_ms,9,31.9979,34.9064,59.6965,59.6965,59.6965
+object,d1f37ed1,Cam hik 1,3,4,3,t0_t3_ms,2,69.9018,67.9959,71.8077,71.8077,71.8077
+object,d1f37ed1,Cam hik 1,3,4,3,t1_t2_ms,9,40.5347,39.7376,70.1788,70.1788,70.1788
+object,d1f37ed1,Cam hik 1,3,4,3,t2_cache_ms,9,5.8228,4.5451,13.402,13.402,13.402
+object,d1f37ed1,Cam hik 1,3,4,3,t2_t3_ms,2,28.0215,11.9222,44.1207,44.1207,44.1207
+object,e0606b55,Cam hướng ra cửa,2,2,1,cache_t3_ms,89,42.647,25.7905,178.4206,237.3943,237.3943
+object,e0606b55,Cam hướng ra cửa,2,2,1,decoder_cuda_ms,91,14.1708,13.21,23.707,26.5693,26.5693
+object,e0606b55,Cam hướng ra cửa,2,2,1,t0_t1_ms,91,32.0998,24.0229,94.8784,155.0161,155.0161
+object,e0606b55,Cam hướng ra cửa,2,2,1,t0_t3_ms,89,103.5878,83.2855,285.2343,295.5977,295.5977
+object,e0606b55,Cam hướng ra cửa,2,2,1,t1_t2_ms,91,22.9448,21.7655,35.1679,38.5287,38.5287
+object,e0606b55,Cam hướng ra cửa,2,2,1,t2_cache_ms,91,6.7126,6.0801,11.4021,16.9806,16.9806
+object,e0606b55,Cam hướng ra cửa,2,2,1,t2_t3_ms,89,49.2683,32.8893,183.575,245.8531,245.8531
+object,e0606b55,Cam hướng ra cửa,2,2,2,cache_t3_ms,70,25.4299,23.3876,48.389,69.5367,69.5367
+object,e0606b55,Cam hướng ra cửa,2,2,2,decoder_cuda_ms,146,12.1454,11.4544,21.7887,26.4766,28.0828
+object,e0606b55,Cam hướng ra cửa,2,2,2,t0_t1_ms,146,31.3615,21.1217,66.4622,185.3412,185.3412
+object,e0606b55,Cam hướng ra cửa,2,2,2,t0_t3_ms,70,100.5903,87.1633,166.2504,287.1646,287.1646
+object,e0606b55,Cam hướng ra cửa,2,2,2,t1_t2_ms,146,27.6765,27.1671,46.892,54.6144,60.657
+object,e0606b55,Cam hướng ra cửa,2,2,2,t2_cache_ms,146,5.8643,4.645,13.4482,14.8013,94.0813
+object,e0606b55,Cam hướng ra cửa,2,2,2,t2_t3_ms,70,34.0112,30.3176,60.7543,102.6422,102.6422
+object,e0606b55,Cam hướng ra cửa,3,2,1,cache_t3_ms,1,19.5884,19.5884,19.5884,19.5884,19.5884
+object,e0606b55,Cam hướng ra cửa,3,2,1,decoder_cuda_ms,1,17.2092,17.2092,17.2092,17.2092,17.2092
+object,e0606b55,Cam hướng ra cửa,3,2,1,t0_t1_ms,1,23.4234,23.4234,23.4234,23.4234,23.4234
+object,e0606b55,Cam hướng ra cửa,3,2,1,t0_t3_ms,1,75.1325,75.1325,75.1325,75.1325,75.1325
+object,e0606b55,Cam hướng ra cửa,3,2,1,t1_t2_ms,1,26.3116,26.3116,26.3116,26.3116,26.3116
+object,e0606b55,Cam hướng ra cửa,3,2,1,t2_cache_ms,1,5.809,5.809,5.809,5.809,5.809
+object,e0606b55,Cam hướng ra cửa,3,2,1,t2_t3_ms,1,25.3974,25.3974,25.3974,25.3974,25.3974
+object,e0606b55,Cam hướng ra cửa,3,2,2,cache_t3_ms,5,20.2917,18.8025,27.9304,27.9304,27.9304
+object,e0606b55,Cam hướng ra cửa,3,2,2,decoder_cuda_ms,10,11.4981,11.6884,18.571,18.571,18.571
+object,e0606b55,Cam hướng ra cửa,3,2,2,t0_t1_ms,10,23.0838,25.3475,40.0003,40.0003,40.0003
+object,e0606b55,Cam hướng ra cửa,3,2,2,t0_t3_ms,5,84.5971,86.703,110.1504,110.1504,110.1504
+object,e0606b55,Cam hướng ra cửa,3,2,2,t1_t2_ms,10,27.1007,25.2154,50.8137,50.8137,50.8137
+object,e0606b55,Cam hướng ra cửa,3,2,2,t2_cache_ms,10,4.2781,3.3109,7.8516,7.8516,7.8516
+object,e0606b55,Cam hướng ra cửa,3,2,2,t2_t3_ms,5,26.3686,23.568,34.9609,34.9609,34.9609
+object,e0606b55,Cam hướng ra cửa,3,3,1,cache_t3_ms,285,35.1211,24.0295,140.9215,205.0516,220.6795
+object,e0606b55,Cam hướng ra cửa,3,3,1,decoder_cuda_ms,288,15.3458,14.4095,24.6632,27.1562,29.8009
+object,e0606b55,Cam hướng ra cửa,3,3,1,t0_t1_ms,288,32.4434,24.5176,108.3145,158.2446,212.8784
+object,e0606b55,Cam hướng ra cửa,3,3,1,t0_t3_ms,285,100.3997,82.2756,281.8322,291.5244,294.1992
+object,e0606b55,Cam hướng ra cửa,3,3,1,t1_t2_ms,288,24.7135,23.6421,36.4368,42.169,43.5726
+object,e0606b55,Cam hướng ra cửa,3,3,1,t2_cache_ms,288,8.2407,7.2757,13.3995,18.3212,111.4643
+object,e0606b55,Cam hướng ra cửa,3,3,1,t2_t3_ms,285,43.3141,31.0964,145.9022,213.6628,229.2681
+object,e0606b55,Cam hướng ra cửa,3,3,2,cache_t3_ms,27,48.1671,24.453,207.2925,215.8969,215.8969
+object,e0606b55,Cam hướng ra cửa,3,3,2,decoder_cuda_ms,56,12.4027,11.4636,22.3332,26.3787,26.3787
+object,e0606b55,Cam hướng ra cửa,3,3,2,t0_t1_ms,56,23.1016,17.7383,50.3211,105.7608,105.7608
+object,e0606b55,Cam hướng ra cửa,3,3,2,t0_t3_ms,27,115.2727,88.0921,284.1666,286.8254,286.8254
+object,e0606b55,Cam hướng ra cửa,3,3,2,t1_t2_ms,56,27.9692,26.9236,49.1336,53.057,53.057
+object,e0606b55,Cam hướng ra cửa,3,3,2,t2_cache_ms,56,5.7822,5.1503,12.6911,14.3013,14.3013
+object,e0606b55,Cam hướng ra cửa,3,3,2,t2_t3_ms,27,56.5282,37.6629,212.6333,222.4838,222.4838
+object,e0606b55,Cam hướng ra cửa,3,3,3,cache_t3_ms,279,32.1012,23.3532,131.4348,181.5959,187.9737
+object,e0606b55,Cam hướng ra cửa,3,3,3,decoder_cuda_ms,873,12.2889,11.3339,22.3269,27.9712,128.3993
+object,e0606b55,Cam hướng ra cửa,3,3,3,t0_t1_ms,873,26.5586,23.2336,64.0311,106.0613,128.5032
+object,e0606b55,Cam hướng ra cửa,3,3,3,t0_t3_ms,279,119.4057,114.3258,278.25,284.8939,289.3134
+object,e0606b55,Cam hướng ra cửa,3,3,3,t1_t2_ms,873,36.1077,33.5518,68.1193,79.4384,174.294
+object,e0606b55,Cam hướng ra cửa,3,3,3,t2_cache_ms,873,4.9948,4.181,10.999,15.0642,26.4884
+object,e0606b55,Cam hướng ra cửa,3,3,3,t2_t3_ms,279,39.8461,30.5669,139.4629,189.3102,192.7271

@@ -1,0 +1,79 @@
+{
+  "event_counts": {
+    "process": 1,
+    "runtime_initialized": 2,
+    "tracker": 13610,
+    "rgba_probe": 13610,
+    "metadata_emit": 13604,
+    "submit_enter": 9885,
+    "gpu_copy_done": 9885,
+    "enqueued": 9884,
+    "worker_enter": 3825,
+    "dropped_stale": 1,
+    "segment_enter": 3824,
+    "cuda_clock": 1,
+    "replaced_pending": 6054,
+    "span": 49681,
+    "cache_publish": 7573,
+    "segment_done": 3822,
+    "mask_attach": 5416
+  },
+  "processes": {
+    "1297": {
+      "event": "process",
+      "ns": 637717175074537,
+      "phase": "controlled_live",
+      "pid": 1297,
+      "epoch_ns": 1790072080161993960,
+      "mono_ns": 637717175073910
+    }
+  },
+  "cuda_clock": [
+    {
+      "event": "cuda_clock",
+      "ns": 637720869462746,
+      "phase": "controlled_live",
+      "pid": 1297,
+      "anchor_ns": 637720869460180,
+      "sync_wall_ms": 0.214626
+    }
+  ],
+  "frames": 13610,
+  "objects": 7821,
+  "complete_masks": 5416,
+  "cameras": [
+    "06e9e5b9",
+    "1ac2ffac",
+    "b1269e28",
+    "c7e22c1f",
+    "d1f37ed1",
+    "e0606b55"
+  ],
+  "startup_exclusion_s": 15,
+  "metadata_packets": 13109,
+  "video_gaps": 93,
+  "longtasks": 1,
+  "client_actions": [
+    {
+      "epoch_ms": 1790072074289,
+      "event": "capture_start",
+      "duration": 110
+    },
+    {
+      "epoch_ms": 1790072131084,
+      "event": "switch_building"
+    },
+    {
+      "epoch_ms": 1790072133593,
+      "event": "switch_monitor"
+    },
+    {
+      "epoch_ms": 1790072188530,
+      "event": "capture_end"
+    },
+    {
+      "epoch_ms": 1790072188532,
+      "event": "socket_close"
+    }
+  ]
+}

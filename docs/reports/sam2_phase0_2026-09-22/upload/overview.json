@@ -1,0 +1,230 @@
+{
+  "event_counts": {
+    "process": 1,
+    "runtime_initialized": 2,
+    "tracker": 20617,
+    "rgba_probe": 20617,
+    "metadata_emit": 20481,
+    "submit_enter": 16012,
+    "gpu_copy_done": 16012,
+    "enqueued": 16012,
+    "worker_enter": 4856,
+    "dropped_stale": 1,
+    "segment_enter": 4855,
+    "cuda_clock": 1,
+    "replaced_pending": 11152,
+    "span": 76068,
+    "cache_publish": 12100,
+    "segment_done": 4853,
+    "mask_attach": 8593
+  },
+  "processes": {
+    "1545": {
+      "event": "process",
+      "ns": 638646807745820,
+      "phase": "upload_build",
+      "pid": 1545,
+      "epoch_ns": 1790073009794664643,
+      "mono_ns": 638646807744880
+    }
+  },
+  "cuda_clock": [
+    {
+      "event": "cuda_clock",
+      "ns": 638650006012105,
+      "phase": "upload_build",
+      "pid": 1545,
+      "anchor_ns": 638650006010312,
+      "sync_wall_ms": 0.180378
+    }
+  ],
+  "frames": 20617,
+  "objects": 12297,
+  "complete_masks": 8593,
+  "cameras": [
+    "06e9e5b9",
+    "1ac2ffac",
+    "b1269e28",
+    "c7e22c1f",
+    "d1f37ed1",
+    "e0606b55"
+  ],
+  "startup_exclusion_s": 15,
+  "metadata_packets": 19648,
+  "video_gaps": 137,
+  "longtasks": 1,
+  "client_actions": [
+    {
+      "epoch_ms": 1790073004282,
+      "event": "capture_start",
+      "duration": 160
+    },
+    {
+      "epoch_ms": 1790073036420,
+      "event": "upload_button_click"
+    },
+    {
+      "epoch_ms": 1790073036516,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models",
+      "status": 201,
+      "model_id": "676fc8b7e4714613b318fe9c9925afc7",
+      "state": "uploading",
+      "received_bytes": 0
+    },
+    {
+      "epoch_ms": 1790073036537,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=0",
+      "status": 200,
+      "received_bytes": 2097152
+    },
+    {
+      "epoch_ms": 1790073036556,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=2097152",
+      "status": 200,
+      "received_bytes": 4194304
+    },
+    {
+      "epoch_ms": 1790073036577,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=4194304",
+      "status": 200,
+      "received_bytes": 6291456
+    },
+    {
+      "epoch_ms": 1790073036598,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=6291456",
+      "status": 200,
+      "received_bytes": 8388608
+    },
+    {
+      "epoch_ms": 1790073036618,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=8388608",
+      "status": 200,
+      "received_bytes": 10485760
+    },
+    {
+      "epoch_ms": 1790073036656,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=10485760",
+      "status": 200,
+      "received_bytes": 12582912
+    },
+    {
+      "epoch_ms": 1790073036677,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=12582912",
+      "status": 200,
+      "received_bytes": 14680064
+    },
+    {
+      "epoch_ms": 1790073036702,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=14680064",
+      "status": 200,
+      "received_bytes": 16777216
+    },
+    {
+      "epoch_ms": 1790073036725,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=16777216",
+      "status": 200,
+      "received_bytes": 18874368
+    },
+    {
+      "epoch_ms": 1790073036753,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=18874368",
+      "status": 200,
+      "received_bytes": 20971520
+    },
+    {
+      "epoch_ms": 1790073036778,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=20971520",
+      "status": 200,
+      "received_bytes": 23068672
+    },
+    {
+      "epoch_ms": 1790073036801,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=23068672",
+      "status": 200,
+      "received_bytes": 25165824
+    },
+    {
+      "epoch_ms": 1790073036822,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=25165824",
+      "status": 200,
+      "received_bytes": 27262976
+    },
+    {
+      "epoch_ms": 1790073036843,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=27262976",
+      "status": 200,
+      "received_bytes": 29360128
+    },
+    {
+      "epoch_ms": 1790073036870,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=29360128",
+      "status": 200,
+      "received_bytes": 31457280
+    },
+    {
+      "epoch_ms": 1790073036892,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=31457280",
+      "status": 200,
+      "received_bytes": 33554432
+    },
+    {
+      "epoch_ms": 1790073036914,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=33554432",
+      "status": 200,
+      "received_bytes": 35651584
+    },
+    {
+      "epoch_ms": 1790073036937,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=35651584",
+      "status": 200,
+      "received_bytes": 37748736
+    },
+    {
+      "epoch_ms": 1790073036952,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/file?offset=37748736",
+      "status": 200,
+      "received_bytes": 37934551
+    },
+    {
+      "epoch_ms": 1790073036968,
+      "event": "upload_response",
+      "url": "http://127.0.0.1:3000/api/backend/models/676fc8b7e4714613b318fe9c9925afc7/build",
+      "status": 202,
+      "model_id": "676fc8b7e4714613b318fe9c9925afc7",
+      "state": "queued",
+      "received_bytes": 37934551
+    },
+    {
+      "epoch_ms": 1790073037273,
+      "event": "upload_ui_complete"
+    },
+    {
+      "epoch_ms": 1790073166804,
+      "event": "capture_end"
+    },
+    {
+      "epoch_ms": 1790073166807,
+      "event": "socket_close"
+    }
+  ]
+}

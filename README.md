@@ -176,7 +176,7 @@ cd "/home/rtcai/Desktop/Vision Manager"
 
 ### Truy cập video qua IP LAN
 
-- Mở `http://192.168.5.212:3000` trên máy trong cùng mạng; giao diện và camera dùng chung dữ liệu với `localhost:3000`.
+- Mở `http://192.168.0.84:3000` (mạng Wi-Fi) hoặc `http://192.168.5.212:3000` (mạng LAN dây) trên máy trong cùng mạng; giao diện và camera dùng chung dữ liệu với `localhost:3000`.
 - Dashboard chuyển tiếp WHEP qua `/api/stream/<camera-id>/whep` trên cổng 3000, không yêu cầu trình duyệt gọi trực tiếp cổng 8081. Có thể cấu hình `MEDIAMTX_WHEP_ORIGIN` trên frontend nếu gateway nằm ở máy khác.
 - Video WebRTC vẫn truyền trực tiếp qua cổng **18189 UDP/TCP**; cho phép cổng này giữa máy xem và server. Metadata tracking dùng cổng **8000 TCP**. Chỉ forward cổng 3000 ra Internet không đủ cho video WebRTC.
 - Khi đổi IP server, cập nhật `webrtcAdditionalHosts` trong `services/mediamtx/mediamtx.yml` và `allowedDevOrigins` trong `web-dashboard/next.config.ts` nếu chạy chế độ dev.

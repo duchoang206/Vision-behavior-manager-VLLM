@@ -1,0 +1,21 @@
+{
+  "deployment": null,
+  "runtime": "idle",
+  "models": [
+    {
+      "id": "479ea92c0b6044febba5b31a5e8e5e08",
+      "name": "best(1).onnx",
+      "state": "ready"
+    },
+    {
+      "id": "78afe7c1ee7a41158803d20e3ae349d4",
+      "name": "best.onnx",
+      "state": "ready"
+    },
+    {
+      "id": "f226ae931b58489b9290aa1044eaa8c1",
+      "name": "best.onnx - live smoke test",
+      "state": "ready"
+    }
+  ]
+}
