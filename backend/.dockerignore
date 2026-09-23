@@ -1,0 +1,8 @@
+# Runtime data is bind-mounted by docker-compose and must not enter build context.
+data/
+models/
+.model-tools/
+__pycache__/
+*.py[cod]
+*.log
+runs/

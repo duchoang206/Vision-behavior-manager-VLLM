@@ -30,8 +30,8 @@ docker compose up -d --no-build --remove-orphans
 
 echo ""
 echo "✅ Hệ thống đã sẵn sàng hoạt động:"
-echo "  - 🌐 Frontend 3D Dashboard: http://192.168.5.104:3000 (hoặc http://localhost:3000)"
-echo "  - ⚡ Backend FastAPI:        http://192.168.5.104:8000"
-echo "  - 📹 WebRTC WHEP MediaMTX:  http://192.168.5.104:8081"
-echo "  - 📡 3D Telemetry WS:       ws://192.168.5.104:8000/ws/digital_twin"
+echo "  - 🌐 Frontend 3D Dashboard: http://192.168.0.84:3000 (hoặc http://192.168.5.212:3000, http://localhost:3000)"
+echo "  - ⚡ Backend FastAPI:        http://192.168.0.84:8000 (hoặc http://192.168.5.212:8000)"
+echo "  - 📹 WebRTC WHEP MediaMTX:  http://192.168.0.84:8081 (hoặc http://192.168.5.212:8081)"
+echo "  - 📡 3D Telemetry WS:       ws://192.168.0.84:8000/ws/digital_twin"
 echo "======================================================================"

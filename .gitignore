@@ -38,6 +38,7 @@ Thumbs.db
 # Docker
 *.dockerignore
 !web-dashboard/.dockerignore
+!backend/.dockerignore
 
 # Reference and temporary tool folders
 deepstream_reference_apps/
@@ -48,6 +49,7 @@ web-dashboard/.next.stale-*/
 backend/data/workflows.json
 backend/data/registered_samples/
 backend/data/identity_metric/
+backend/data/active_learning/
 
 recordings/
 backend/runs/
