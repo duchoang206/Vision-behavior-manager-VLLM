@@ -30,24 +30,41 @@ def masked_descriptor(features, bitmap, image_shape, input_shape):
     return functional.normalize(torch.cat((functional.normalize(mean, dim=1), functional.normalize(deviation, dim=1)), dim=1), dim=1)[0]
 
 
-def triplet_loss(embeddings, labels, margin=0.25, negative_weight=2.0):
+def triplet_loss(embeddings, labels, margin=0.30, negative_weight=2.5, minimum_negative_distance=0.40):
+    """Batch-hard triplet loss for multi-view registered identities.
+
+    Embeddings are cosine-normalized, so distance is ``1 - cosine``.  The
+    hardest positive keeps different viewpoints of one object together while
+    the closest negative receives an additional separation penalty.  Anchors
+    without both a positive and a negative are ignored instead of producing a
+    misleading zero/large loss during incremental registration.
+    """
     embeddings = functional.normalize(embeddings, dim=1)
+    labels = labels.reshape(-1)
     similarities = embeddings @ embeddings.T
+    distances = 1.0 - similarities
     same = labels[:, None].eq(labels[None, :])
-    positive = same & ~torch.eye(len(labels), device=labels.device, dtype=torch.bool)
+    diagonal = torch.eye(len(labels), device=labels.device, dtype=torch.bool)
+    positive = same & ~diagonal
     negative = ~same
     valid = positive.any(dim=1) & negative.any(dim=1)
-    positive_distance = (1 - similarities).masked_fill(~positive, -1).max(dim=1).values
-    negative_distance = (1 - similarities).masked_fill(~negative, 3).min(dim=1).values
-    penalties = functional.relu(positive_distance - negative_distance + margin)
-    penalties = penalties + negative_weight * functional.relu(0.35 - negative_distance)
+    hardest_positive = distances.masked_fill(~positive, -1.0).max(dim=1).values
+    closest_negative = distances.masked_fill(~negative, 3.0).min(dim=1).values
+    triplet_penalty = functional.relu(hardest_positive - closest_negative + margin)
+    separation_penalty = functional.relu(minimum_negative_distance - closest_negative)
+    penalties = triplet_penalty + negative_weight * separation_penalty
     return (penalties * valid).sum() / valid.sum().clamp_min(1)
 
 
 
 
 class IdentityMetric:
-    def __init__(self, directory, device="cuda:0", auto_train=True, model_signature=None):
+    LOSS_VERSION = 2
+
+    def __init__(self, directory, device="cuda:0", auto_train=True, model_signature=None,
+                 descriptor_name="sam2_mask_mean_std_v1", minimum_similarity=None):
+        self.descriptor_name = descriptor_name
+        self.minimum_similarity = minimum_similarity
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
         self.device = torch.device(device)
@@ -63,6 +80,7 @@ class IdentityMetric:
         self.last_loss = None
         self.auto_train = auto_train
         self.last_fit_at = 0.0
+        self.loss_version = self.LOSS_VERSION
         self.model_signature = model_signature
         self.training_stream = torch.cuda.Stream(device=self.device, priority=0) if self.device.type == "cuda" else None
         for path in self.directory.glob("samples/*/*.json"):
@@ -79,13 +97,17 @@ class IdentityMetric:
         if checkpoint.is_file():
             try:
                 state = torch.load(checkpoint, map_location=self.device, weights_only=True)
-                if state.get("descriptor") == "sam2_mask_mean_std_v1" and state.get("model_signature") == self.model_signature:
-                    self.projection = state["weight"].float()
+                if state.get("descriptor") == self.descriptor_name and state.get("model_signature") == self.model_signature:
+                    self.projection = state["weight"].float().to(self.device)
                     self.revision = int(state["revision"])
                     self.last_loss = state.get("loss")
+                    self.loss_version = int(state.get("loss_version", 1))
             except Exception as error:
                 self.last_error = str(error)
-        self.pending = bool(self.records)
+        self.pending = bool(self.records) and (self.projection is None or self.loss_version != self.LOSS_VERSION)
+        if self.auto_train and self.pending:
+            self.training = True
+            threading.Thread(target=self._training_loop, name="identity-triplet", daemon=True).start()
 
     @torch.inference_mode()
     def _project_gallery(self):
@@ -115,7 +137,7 @@ class IdentityMetric:
     def learn(self, label, cam_id, fingerprint, vector):
         feature = torch.as_tensor(vector, dtype=torch.float32).reshape(-1)
         if len(feature) != 512 or not torch.isfinite(feature).all() or feature.norm() < 1e-6:
-            raise ValueError("Đặc trưng SAM không hợp lệ.")
+            raise ValueError("Đặc trưng định danh không hợp lệ.")
         key = hashlib.sha256(f"{cam_id}\0{label}\0{fingerprint}".encode()).hexdigest()
         with self.lock:
             if key not in self.records:
@@ -190,10 +212,8 @@ class IdentityMetric:
             optimizer = torch.optim.AdamW([weight], lr=0.001, weight_decay=0.001)
             baseline = float(triplet_loss(functional.linear(features, weight), identities).detach())
             for _step in range(steps):
-                selected_labels = torch.randperm(len(grouped), device=self.device)[:8]
-                indices = torch.cat([torch.where(identities == label)[0] for label in selected_labels])
-                projected = functional.linear(features[indices], weight)
-                loss = triplet_loss(projected, identities[indices]) + 0.02 * (weight - initial).square().mean()
+                projected = functional.linear(features, weight)
+                loss = triplet_loss(projected, identities) + 0.02 * (weight - initial).square().mean()
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
@@ -206,7 +226,8 @@ class IdentityMetric:
             with self.lock:
                 if not record_keys.issubset(self.records):
                     return False
-                checkpoint = dict(descriptor="sam2_mask_mean_std_v1", weight=weight.detach(), revision=self.revision + 1, loss=final_loss,
+                checkpoint = dict(descriptor=self.descriptor_name, loss_version=self.LOSS_VERSION,
+                                  weight=weight.detach(), revision=self.revision + 1, loss=final_loss,
                                   model_signature=self.model_signature)
                 temporary = self.directory / "projection.tmp"
                 torch.save(checkpoint, temporary)
@@ -215,6 +236,7 @@ class IdentityMetric:
                 self.projected_gallery.clear()
                 self.revision += 1
                 self.last_loss = final_loss
+                self.loss_version = self.LOSS_VERSION
                 self.last_fit_at = time.time()
                 self.last_error = None
         return True
@@ -229,20 +251,51 @@ class IdentityMetric:
             projected_gallery = dict(self.projected_gallery)
         if label not in gallery:
             return dict(accepted=False, reason="identity_unavailable")
-        query = functional.normalize(descriptor.to(self.device).float().reshape(1, 512), dim=1)
-        raw_score = float((gallery[label] @ query.T).max())
+        query = functional.normalize(torch.as_tensor(descriptor, device=self.device, dtype=torch.float32).reshape(1, 512), dim=1)
+        if not torch.isfinite(query).all() or query.norm() < 1e-6:
+            return dict(accepted=False, reason="invalid_descriptor")
+        raw_similarities = (gallery[label] @ query.T).flatten()
+        raw_score = float(raw_similarities.max())
+        raw_topk = float(raw_similarities.topk(min(3, len(raw_similarities))).values.mean())
         if projection is not None:
             query = functional.normalize(functional.linear(query, projection), dim=1)
         scores = {}
+        supports = {}
         for candidate, projected in projected_gallery.items():
-            scores[candidate] = float((projected @ query.T).max())
+            similarities = (projected @ query.T).flatten()
+            top_k = min(max(1, int(os.getenv("REGISTERED_IDENTITY_TOPK", "3"))), len(similarities))
+            top_values = similarities.topk(top_k).values
+            scores[candidate] = float(top_values.mean())
+            supports[candidate] = int((similarities >= float(os.getenv("REGISTERED_IDENTITY_SUPPORT_SIMILARITY", "0.78"))).sum())
         score = scores[label]
         rival = max((value for candidate, value in scores.items() if candidate != label), default=-1)
-        threshold = float(os.getenv("REGISTERED_IDENTITY_MIN_SIMILARITY", "0.86"))
-        margin = float(os.getenv("REGISTERED_IDENTITY_RIVAL_MARGIN", "0.035"))
-        accepted = raw_score >= threshold and score >= 0.75 and score - rival >= margin
-        reason = None if accepted else ("identity_ambiguous" if score - rival < margin else "identity_mismatch")
-        return dict(accepted=accepted, reason=reason, score=round(score, 4), raw_score=round(raw_score, 4), rival_score=round(rival, 4), revision=self.revision)
+        threshold = self.minimum_similarity if self.minimum_similarity is not None else float(os.getenv("REGISTERED_IDENTITY_MIN_SIMILARITY", "0.86"))
+        margin = float(os.getenv("REGISTERED_IDENTITY_RIVAL_MARGIN", "0.05"))
+        projected_threshold = threshold if self.minimum_similarity is not None else float(os.getenv("REGISTERED_IDENTITY_PROJECTED_MIN_SIMILARITY", "0.78"))
+        minimum_support = max(1, int(os.getenv("REGISTERED_IDENTITY_MIN_SUPPORT", "1")))
+        accepted = (
+            raw_score >= threshold
+            and raw_topk >= threshold - 0.08
+            and score >= projected_threshold
+            and supports.get(label, 0) >= minimum_support
+            and score - rival >= margin
+        )
+        if accepted:
+            reason = None
+        elif score - rival < margin:
+            reason = "identity_ambiguous"
+        else:
+            reason = "identity_mismatch"
+        return dict(
+            accepted=accepted,
+            reason=reason,
+            score=round(score, 4),
+            raw_score=round(raw_score, 4),
+            raw_topk=round(raw_topk, 4),
+            rival_score=round(rival, 4),
+            support=supports.get(label, 0),
+            revision=self.revision,
+        )
 
     def status(self):
         with self.lock:
@@ -250,8 +303,10 @@ class IdentityMetric:
             for record in self.records.values():
                 counts[record["label"]] = counts.get(record["label"], 0) + 1
             ready = len(counts) >= 2 and max(counts.values(), default=0) >= 2
-            return dict(descriptor="sam2_mask_mean_std_v1", device=str(self.device), samples=len(self.records), labels=counts,
-                        model_signature=self.model_signature,
+            return dict(descriptor=self.descriptor_name, device=str(self.device), samples=len(self.records), labels=counts,
+                        positive_labels=sorted(label for label, count in counts.items() if count >= 2),
+                        waiting_for_more_views=sorted(label for label, count in counts.items() if count < 2),
+                        model_signature=self.model_signature, loss_version=self.loss_version,
                         revision=self.revision, training=self.training, ready=ready, last_loss=self.last_loss,
                         last_error=self.last_error, last_fit_at=self.last_fit_at,
                         state="training" if self.training else "trained" if self.projection is not None else "waiting_for_positive_and_negative_samples")

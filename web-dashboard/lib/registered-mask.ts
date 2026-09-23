@@ -3,6 +3,8 @@ export type RegisteredMask = {
   source?: string;
   confidence?: number;
   observed_at?: number;
+  frame_id?: number;
+  attached_at?: number;
 };
 
 export function validRegisteredMask(mask?: RegisteredMask | null): mask is RegisteredMask {

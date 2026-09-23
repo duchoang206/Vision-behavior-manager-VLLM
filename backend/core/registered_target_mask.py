@@ -11,6 +11,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from core.registered_samples import sample_fingerprint
+from core.robot_spatial_identity import robot_spatial_identity, spatial_verification
 
 import cv2
 import numpy as np
@@ -187,31 +188,57 @@ class MaskRuntime:
         return mask_payload(result.masks.data[best_index].cpu().numpy(), confidence=float(result.boxes.conf[best_index]))
 
     def configure(self, cam_id, targets):
-        from ultralytics.models.sam import SAM2DynamicInteractivePredictor
+        from core.sam2_live_predictor import LiveSAM2Predictor
 
-        self.cameras.pop(cam_id, None)
+        previous = self.cameras.pop(cam_id, {"objects": {}})
         if not targets:
             return
         state = {"objects": {}}
         self.cameras[cam_id] = state
         for target in targets:
-            predictor = SAM2DynamicInteractivePredictor(overrides=self.options, max_obj_num=1)
-            predictor.setup_model(model=self.preview.model, verbose=False)
-            entry = {"predictor": predictor, "seeded": False, "last_binary": None, "last_bbox": None, "last_mask_at": 0.0}
-            state["objects"][target["label"]] = entry
             samples = [sample for sample in target.get("samples", []) if sample.get("mask") and sample.get("frame_image")]
+            signature = tuple(sample_fingerprint(sample["frame_image"], sample["mask"]) for sample in samples)
+            existing = previous["objects"].get(target["label"])
+            if existing is not None and existing.get("sample_signature") == signature:
+                state["objects"][target["label"]] = existing
+                continue
+            predictor = LiveSAM2Predictor(overrides=dict(self.options, conf=0.0), max_obj_num=1)
+            predictor.setup_model(model=self.preview.model, verbose=False)
+            entry = {"predictor": predictor, "seeded": False, "last_binary": None, "last_bbox": None,
+                     "last_mask_at": 0.0, "sample_signature": signature, "box_sizes": [],
+                     "misses": 0, "recovery_attempts": 0, "next_recovery_at": 0.0}
+            state["objects"][target["label"]] = entry
             view_limit = min(16, max(1, int(os.getenv("REGISTERED_MASK_MEMORY_VIEWS", "8"))))
             for sample in samples[-view_limit:]:
+                self._reset_predictor_memory(predictor)
                 frame = decode_frame(sample["frame_image"])
                 bitmap = mask_bitmap(sample["mask"], frame.shape)
                 predictor(source=frame, masks=bitmap[..., None][None], obj_ids=[0], update_memory=True)
                 descriptor = self._identity_descriptor(predictor, bitmap, frame.shape).detach().cpu().tolist()
                 self.identity.learn(target["label"], cam_id, sample_fingerprint(sample["frame_image"], sample["mask"]), descriptor)
-                entry["seeded"] = True
+                points = np.concatenate([np.asarray(ring) for ring in sample["mask"]["polygons"]])
+                dimensions = (points.max(axis=0) - points.min(axis=0)).tolist()
+                entry["box_sizes"].append(dimensions)
+            self._reset_predictor_memory(predictor)
+            entry["seeded"] = False
+
+    @staticmethod
+    def _reset_predictor_memory(predictor):
+        """Drop SAM2's temporal state after a confirmed identity mismatch."""
+        predictor.memory_bank.clear()
+        predictor.obj_idx_set.clear()
+        predictor.live_output = None
+        for mapping_name in ("obj_id_to_idx", "obj_idx_to_id"):
+            mapping = getattr(predictor, mapping_name, None)
+            if mapping is not None:
+                mapping.clear()
+                for index in range(int(getattr(predictor, "_max_obj_num", 1))):
+                    mapping[index] = index
+        predictor.reset_image()
 
     @contextmanager
     def _frame_features(self, frame, predictors):
-        if not self.shared_features or len(predictors) < 2:
+        if not self.shared_features or not predictors:
             yield
             return
         import torch
@@ -232,16 +259,57 @@ class MaskRuntime:
                     predictor.backbone_out = None
                     predictor.reset_image()
 
-    def track(self, cam_id, frame, seeds):
+    def track(self, cam_id, frame, seeds, spatial_context=None):
+        import torch
+
         state = self.cameras.get(cam_id)
         if state is None:
             return {}
-        entries = {label: entry for label, entry in state["objects"].items()
-                   if entry["seeded"] or label in seeds}
-        with self._frame_features(frame, [entry["predictor"] for entry in entries.values()]):
-            return self._track_objects(frame, entries, seeds)
+        now = time.monotonic()
+        entries = {label: entry for label, entry in state["objects"].items() if entry["seeded"]}
+        recovering = [(label, entry) for label, entry in state["objects"].items()
+                      if not entry["seeded"] and (label in seeds or entry.get("box_sizes"))
+                      and now >= entry.get("next_recovery_at", 0)]
+        if recovering:
+            label, entry = min(recovering, key=lambda item: item[1].get("next_recovery_at", 0))
+            entries[label] = entry
+        with torch.inference_mode(), self._frame_features(frame, [entry["predictor"] for entry in entries.values()]):
+            return self._track_objects(frame, entries, seeds, spatial_context)
 
-    def _track_objects(self, frame, entries, seeds):
+    def _recovery_bbox(self, label, entry, frame, seeds, spatial_context=None):
+        attempt = entry.get("recovery_attempts", 0)
+        entry["recovery_attempts"] = attempt + 1
+        entry["next_recovery_at"] = time.monotonic() + max(0.1, float(os.getenv("REGISTERED_MASK_RECOVERY_INTERVAL", "0.6")))
+        entry["diagnostics"]["recovery_attempts"] = entry["recovery_attempts"]
+        nearby = seeds.get(label) or entry.get("last_bbox")
+        if nearby is not None and spatial_verification(spatial_context, label, nearby)["accepted"] is False:
+            nearby = None
+        if nearby is not None and attempt % 4 == 0:
+            return nearby
+        if not entry.get("box_sizes"):
+            return nearby
+        from core.registered_mask_recovery import appearance_candidates
+        predictor = entry["predictor"]
+        predictor.setup_source(frame)
+        image = predictor.preprocess([frame])
+        predictor.get_im_features(image)
+        candidates = appearance_candidates(self.identity, label, predictor, frame.shape, entry["box_sizes"])
+        candidates = [bbox for bbox in candidates if spatial_verification(spatial_context, label, bbox)["accepted"] is not False]
+        entry["diagnostics"]["recovery_candidates"] = len(candidates)
+        if not candidates:
+            return nearby
+        search_attempt = entry.get("search_attempts", 0)
+        entry["search_attempts"] = search_attempt + 1
+        return candidates[search_attempt % len(candidates)]
+
+    def _lose_memory(self, entry):
+        self._reset_predictor_memory(entry["predictor"])
+        entry["seeded"] = False
+        entry["last_binary"] = None
+        entry.pop("shape_distance", None)
+        entry["diagnostics"].update(state="searching", memory_count=0)
+
+    def _track_objects(self, frame, entries, seeds, spatial_context=None):
         observations = {}
         for label, entry in entries.items():
             diagnostics = entry.setdefault("diagnostics", {"frames": 0, "accepted": 0, "rejections": {}})
@@ -249,44 +317,64 @@ class MaskRuntime:
             diagnostics.update(last_score=None, last_rejection=None)
             predictor = entry["predictor"]
             if not entry["seeded"]:
-                if label not in seeds:
+                bbox = self._recovery_bbox(label, entry, frame, seeds, spatial_context)
+                if bbox is None:
+                    diagnostics.update(state="searching", last_rejection="no_recovery_candidate")
                     continue
-                predictor(source=frame, bboxes=[pixels_bbox(seeds[label], frame.shape)],
-                          obj_ids=[0], update_memory=True)
+                result = predictor(source=frame, bboxes=[pixels_bbox(bbox, frame.shape)],
+                                   obj_ids=[0], update_memory=True)[0]
                 entry["seeded"] = True
-            result = predictor(source=frame)[0]
+            else:
+                result = predictor(source=frame)[0]
             if result.masks is None or len(result.boxes) == 0:
                 self._reject(entry, "no_sam_mask")
+                if not entry["seeded"]:
+                    observations[label] = {"tracking_lost": True, "reason": "no_sam_mask"}
                 continue
             box = result.boxes[0]
             diagnostics["last_score"] = float(box.conf.item())
             if diagnostics["last_score"] <= 0:
                 self._reject(entry, "no_object_presence")
                 continue
+            height, width = frame.shape[:2]
+            left, top, right, bottom = box.xyxy[0].cpu().tolist()
+            measured_bbox = [left / width, top / height, (right - left) / width, (bottom - top) / height]
+            spatial = spatial_verification(spatial_context, label, measured_bbox)
+            diagnostics["spatial_identity"] = spatial
+            if spatial["accepted"] is False:
+                self._reject(entry, spatial["reason"])
+                self._lose_memory(entry)
+                observations[label] = {"identity_rejected": True, "identity": spatial}
+                continue
             descriptor = self._identity_descriptor(predictor, result.masks.data[0], frame.shape)
             verification = self.identity.verify(label, descriptor)
             diagnostics["identity"] = verification
             if not verification["accepted"]:
                 self._reject(entry, verification["reason"])
-                entry.pop("shape_distance", None)
+                self._lose_memory(entry)
                 observations[label] = {"identity_rejected": True, "identity": verification}
                 continue
             binary = result.masks.data[0].cpu().numpy()
             if binary.sum() < 32 or binary.mean() > 0.6:
                 self._reject(entry, "mask_area")
                 continue
-            height, width = frame.shape[:2]
-            left, top, right, bottom = box.xyxy[0].cpu().tolist()
-            measured_bbox = [left / width, top / height, (right - left) / width, (bottom - top) / height]
             binary = self._smooth_mask(entry, binary, measured_bbox)
             payload = mask_payload(binary, "sam2_memory", float(box.conf.item()))
             if payload is None:
                 self._reject(entry, "invalid_contour")
                 continue
+            if predictor.commit_live_memory(limit=max(1, int(os.getenv("REGISTERED_MASK_LIVE_MEMORIES", "3")))):
+                diagnostics["memory_updates"] = diagnostics.get("memory_updates", 0) + 1
+            if entry.get("recovery_attempts"):
+                diagnostics["recoveries"] = diagnostics.get("recoveries", 0) + 1
+            entry.update(misses=0, recovery_attempts=0, search_attempts=0, next_recovery_at=0.0)
+            diagnostics.update(state="tracking", consecutive_misses=0, recovery_attempts=0,
+                               memory_count=len(predictor.memory_bank))
             diagnostics["accepted"] += 1
             payload["presence_confidence"] = sam2_presence_confidence(float(box.conf.item()))
             payload["score_type"] = "sam2_positive_object_logit_div32"
             payload["identity"] = verification
+            payload["spatial_identity"] = spatial
             observations[label] = {
                 "bbox": measured_bbox,
                 "mask": payload,
@@ -294,11 +382,14 @@ class MaskRuntime:
         return observations
 
 
-    @staticmethod
-    def _reject(entry, reason):
+    def _reject(self, entry, reason):
         diagnostics = entry["diagnostics"]
         diagnostics["last_rejection"] = reason
         diagnostics["rejections"][reason] = diagnostics["rejections"].get(reason, 0) + 1
+        entry["misses"] = entry.get("misses", 0) + 1
+        diagnostics["consecutive_misses"] = entry["misses"]
+        if entry["misses"] >= max(1, int(os.getenv("REGISTERED_MASK_RESET_MISSES", "3"))):
+            self._lose_memory(entry)
 
 def _worker(connection, model_path):
     runtime = None
@@ -325,7 +416,7 @@ def _worker(connection, model_path):
                     runtime.identity.forget(request["label"], request.get("cam_id"))
                     result = runtime.identity.status()
                 else:
-                    result = runtime.track(request["cam_id"], request["frame"], request["seeds"])
+                    result = runtime.track(request["cam_id"], request["frame"], request["seeds"], request.get("spatial_context"))
                 response = {"result": result, "identity": runtime.identity.status()}
                 if action == "track":
                     response["diagnostics"] = {
@@ -434,7 +525,7 @@ class RegisteredTargetMaskSegmenter:
     def forget_identity(self, label, cam_id=None):
         return self._request(action="forget_identity", label=label, cam_id=cam_id)
 
-    def track(self, cam_id, frame, targets, seeds):
+    def track(self, cam_id, frame, targets, seeds, observed_at=None):
         selected = [target for target in targets if eligible_target(target)]
         if not selected:
             if cam_id in self._signatures:
@@ -457,12 +548,14 @@ class RegisteredTargetMaskSegmenter:
                         {"label": target["label"], "samples": target.get("mask_samples", [])} for target in selected
                     ])
                     self._signatures[cam_id] = signature
-                result = self._request(action="track", cam_id=cam_id, frame=frame, seeds=seeds)
+                spatial_context = robot_spatial_identity.context(cam_id, selected, time.time() if observed_at is None else observed_at)
+                result = self._request(action="track", cam_id=cam_id, frame=frame, seeds=seeds, spatial_context=spatial_context)
                 self.last_error = None
                 self.last_ms = round((time.monotonic() - started) * 1000, 1)
-                diagnostics.update(last_ms=self.last_ms, last_observed_labels=list(result),
+                observed = [label for label, observation in result.items() if observation.get("mask")]
+                diagnostics.update(last_ms=self.last_ms, last_observed_labels=observed,
                                    frames=diagnostics.get("frames", 0) + 1,
-                                   empty_frames=diagnostics.get("empty_frames", 0) + int(not result))
+                                   empty_frames=diagnostics.get("empty_frames", 0) + int(not observed))
                 return result
             except Exception as exc:
                 self.last_error = str(exc)
