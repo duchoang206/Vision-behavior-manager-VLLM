@@ -141,18 +141,10 @@ class WorkflowStore:
 
     @staticmethod
     def check_detector_conflict(cursor, definition):
-        from core.custom_detector import requested_models
-        selected = requested_models(definition)
-        if not selected:
-            return
-        cursor.execute("SELECT definition FROM workflow.deployments WHERE status <> 'stopped'")
-        active = set().union(*(requested_models(row["definition"]) for row in cursor.fetchall()))
-        cursor.execute("SELECT to_regclass('vision.monitor_model') AS table_name")
-        if cursor.fetchone()["table_name"]:
-            cursor.execute("SELECT model_id FROM vision.monitor_model WHERE singleton=TRUE")
-            active.update(row["model_id"] for row in cursor.fetchall())
-        if len(active | selected) > 1:
-            raise WorkflowConflict("GPU đang được deploy model khác. Dừng các bản deploy đó trước khi đổi model.")
+        # A workflow may now use more than one model.  Admission and failure
+        # isolation are handled by the per-model DeepStream supervisor, rather
+        # than a database singleton lock.
+        return None
 
     def delete(self, pipeline_id, revision, actor):
         with self.transaction() as cursor:

@@ -48,7 +48,7 @@ class ActiveLearningWorker:
     def resource_reason(self, starting=True):
         if self.registry.process is not None:
             return "Registry đang build TensorRT."
-        if self.detector.status().get("running") or self.registry.deployment() or self.detector.workflows.active():
+        if self.detector.status().get("running") or self.registry.deployments(enabled_only=True) or self.detector.workflows.active():
             return "Chờ dừng deployment Monitor/workflow: ưu tiên GPU cho DeepStream realtime."
         if os.getenv("DISABLE_DEEPSTREAM_GST", "0") != "1":
             return "Person DeepStream có thể đang dùng GPU; không tự tranh tài nguyên."

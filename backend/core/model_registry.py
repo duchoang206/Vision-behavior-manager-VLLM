@@ -31,6 +31,8 @@ class ModelRegistry(WorkflowStore):
         self.gpu_build_waiting = False
         self.gpu_build_wait_started = 0.0
         self.parser = os.getenv("VISION_YOLO_PARSER", "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo.so")
+        self.seg_parser = os.getenv("VISION_YOLO_SEG_PARSER", "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg.so")
+        self.pose_parser = os.getenv("VISION_YOLO_POSE_PARSER", "/opt/visionmanager/libperson_pose_parser.so")
         self.trtexec = os.getenv("TRTEXEC_PATH", "/usr/src/tensorrt/bin/trtexec")
 
     def initialize(self):
@@ -43,13 +45,25 @@ class ModelRegistry(WorkflowStore):
                     state TEXT NOT NULL, labels JSONB NOT NULL DEFAULT '[]', metadata JSONB NOT NULL DEFAULT '{}',
                     error TEXT, actor TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
-                CREATE TABLE IF NOT EXISTS vision.monitor_model (
-                    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK(singleton),
-                    model_id TEXT NOT NULL REFERENCES vision.models(id),
+                CREATE TABLE IF NOT EXISTS vision.model_deployments (
+                    id TEXT PRIMARY KEY, model_id TEXT NOT NULL UNIQUE REFERENCES vision.models(id),
                     camera_ids JSONB NOT NULL DEFAULT '[]', all_cameras BOOLEAN NOT NULL DEFAULT TRUE,
-                    actor TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+                    enabled BOOLEAN NOT NULL DEFAULT TRUE, actor TEXT NOT NULL,
+                    confidence_thresholds JSONB NOT NULL DEFAULT '{}',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+                ALTER TABLE vision.model_deployments ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE;
+                ALTER TABLE vision.model_deployments ADD COLUMN IF NOT EXISTS confidence_thresholds JSONB NOT NULL DEFAULT '{}'::jsonb;
                 UPDATE vision.models SET state='failed', error='Build bị ngắt bởi lần khởi động trước. Bấm build lại.',
                     updated_at=NOW() WHERE state IN ('building','validating');""")
+            # Migrate the former singleton exactly once, then remove the schema
+            # constraint that prevented multiple models from running together.
+            cursor.execute("SELECT to_regclass('vision.monitor_model') AS table_name")
+            if cursor.fetchone()["table_name"]:
+                cursor.execute("""INSERT INTO vision.model_deployments(id,model_id,camera_ids,all_cameras,enabled,actor)
+                    SELECT md5('legacy:' || model_id),model_id,camera_ids,all_cameras,TRUE,actor
+                    FROM vision.monitor_model WHERE singleton=TRUE
+                    ON CONFLICT(model_id) DO NOTHING""")
+                cursor.execute("DROP TABLE vision.monitor_model")
         self.ready = True
         self.stop_event.clear()
         self.thread = threading.Thread(target=self._run, name="model-engine-builder", daemon=True)
@@ -103,14 +117,19 @@ class ModelRegistry(WorkflowStore):
             cursor.execute("UPDATE vision.models SET metadata=%s,updated_at=NOW() WHERE id=%s", (Json(metadata), model_id))
 
     def deployment(self):
-        if not self.ready:
-            return None
-        with self.transaction() as cursor:
-            cursor.execute("SELECT * FROM vision.monitor_model WHERE singleton=TRUE")
-            row = cursor.fetchone()
-            return dict(row) if row else None
+        """Legacy single-deployment view retained for older callers."""
+        deployments = self.deployments()
+        return deployments[0] if deployments else None
 
-    def deploy(self, model_id, camera_ids, all_cameras, available, actor):
+    def deployments(self, enabled_only=False):
+        if not self.ready:
+            return []
+        with self.transaction() as cursor:
+            cursor.execute("SELECT * FROM vision.model_deployments {} ORDER BY created_at ASC".format(
+                "WHERE enabled=TRUE" if enabled_only else ""))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def deploy(self, model_id, camera_ids, all_cameras, available, actor, confidence_thresholds=None):
         if not self.ready:
             raise WorkflowConflict("Kho model chưa sẵn sàng.")
         camera_ids = sorted(set(camera_ids))
@@ -124,27 +143,44 @@ class ModelRegistry(WorkflowStore):
             directory = self.directory(model_id)
             if row["state"] != "ready" or not all((directory / name).is_file() for name in ("detector.engine", "nvinfer.txt")):
                 raise WorkflowConflict("Model chưa có TensorRT engine Ready.")
-            from core.custom_detector import requested_models
-            cursor.execute("SELECT definition FROM workflow.deployments WHERE status <> 'stopped'")
-            active = set().union(*(requested_models(item["definition"]) for item in cursor.fetchall()))
-            if active - {model_id}:
-                raise WorkflowConflict("Dừng workflow dùng model khác trước khi đổi model Monitor.")
-            cursor.execute("""INSERT INTO vision.monitor_model(singleton,model_id,camera_ids,all_cameras,actor)
-                VALUES(TRUE,%s,%s,%s,%s) ON CONFLICT(singleton) DO UPDATE SET model_id=EXCLUDED.model_id,
-                camera_ids=EXCLUDED.camera_ids,all_cameras=EXCLUDED.all_cameras,actor=EXCLUDED.actor,updated_at=NOW()
-                RETURNING *""", (model_id, Json([] if all_cameras else camera_ids), all_cameras, actor))
+            deployment_id = uuid.uuid4().hex
+            cursor.execute("""INSERT INTO vision.model_deployments(id,model_id,camera_ids,all_cameras,enabled,actor,confidence_thresholds)
+                VALUES(%s,%s,%s,%s,TRUE,%s,%s) ON CONFLICT(model_id) DO UPDATE SET
+                camera_ids=EXCLUDED.camera_ids,all_cameras=EXCLUDED.all_cameras,enabled=TRUE,
+                actor=EXCLUDED.actor,confidence_thresholds=EXCLUDED.confidence_thresholds,updated_at=NOW() RETURNING *""",
+                (deployment_id, model_id, Json([] if all_cameras else camera_ids), all_cameras, actor, Json(confidence_thresholds or {})))
             result = dict(cursor.fetchone())
             self.log(cursor, None, None, "Model Monitor deployed", {"model_id": model_id, "actor": actor,
-                                                                   "all_cameras": all_cameras, "camera_ids": camera_ids})
+                                                                   "all_cameras": all_cameras, "camera_ids": camera_ids,
+                                                                   "confidence_thresholds": confidence_thresholds or {}})
             return result
 
-    def stop_deployment(self, actor):
+    def set_deployment_enabled(self, deployment_id, enabled, actor):
         with self.transaction() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(724091)")
-            cursor.execute("DELETE FROM vision.monitor_model WHERE singleton=TRUE RETURNING model_id")
-            previous = cursor.fetchone()
-            self.log(cursor, None, None, "Model Monitor stopped", {"actor": actor, "model_id": previous["model_id"] if previous else None})
-        return {"stopped": True}
+            cursor.execute("UPDATE vision.model_deployments SET enabled=%s,actor=%s,updated_at=NOW() WHERE id=%s RETURNING *",
+                           (bool(enabled), actor, deployment_id))
+            result = cursor.fetchone()
+            if not result:
+                raise KeyError("Không tìm thấy deployment.")
+            result = dict(result)
+            self.log(cursor, None, None, "Model Monitor deployment updated",
+                     {"actor": actor, "model_id": result["model_id"], "deployment_id": deployment_id, "enabled": bool(enabled)})
+            return result
+
+    def stop_deployment(self, actor, deployment_id=None):
+        with self.transaction() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(724091)")
+            if deployment_id:
+                cursor.execute("DELETE FROM vision.model_deployments WHERE id=%s RETURNING model_id", (deployment_id,))
+            else:
+                # Kept as a compatibility endpoint; the plural API removes one
+                # deployment at a time.
+                cursor.execute("DELETE FROM vision.model_deployments RETURNING model_id")
+            previous = cursor.fetchall()
+            self.log(cursor, None, None, "Model Monitor stopped", {"actor": actor,
+                     "model_ids": [item["model_id"] for item in previous]})
+        return {"stopped": True, "count": len(previous)}
 
     def create(self, name, filename, size, labels, actor):
         if not self.ready:
@@ -244,8 +280,10 @@ class ModelRegistry(WorkflowStore):
                 with (directory / "build.log").open("w") as log:
                     self._execute([sys.executable, "-m", "core.model_contract", str(request_file), str(output_file)], log, 90, env)
                     metadata = json.loads(output_file.read_text())
-                    if not Path(self.trtexec).is_file() or not Path(self.parser).is_file():
-                        raise ValueError("Container thiếu trtexec hoặc custom YOLO parser.")
+                    parser = {"segment": self.seg_parser, "pose": self.pose_parser}.get(
+                        metadata.get("model_type"), self.parser)
+                    if not Path(self.trtexec).is_file() or not Path(parser).is_file():
+                        raise ValueError("Container thiếu trtexec hoặc custom YOLO parser tương ứng với model.")
                     if shutil.disk_usage(self.root).free < row["size_bytes"] * 2 + 1024**3:
                         raise ValueError("SSD thiếu chỗ để build engine.")
                     self._state(model_id, "building", metadata)
@@ -256,7 +294,7 @@ class ModelRegistry(WorkflowStore):
                         raise ValueError("Không tạo được TensorRT engine hợp lệ.")
                     temporary.replace(directory / "detector.engine")
                     (directory / "labels.txt").write_text("\n".join(metadata["labels"]) + "\n")
-                    (directory / "nvinfer.txt").write_text(infer_config(directory, metadata, self.parser))
+                    (directory / "nvinfer.txt").write_text(infer_config(directory, metadata, parser))
                     self._state(model_id, "ready", metadata)
             except Exception as error:
                 logging.exception("Model build failed")

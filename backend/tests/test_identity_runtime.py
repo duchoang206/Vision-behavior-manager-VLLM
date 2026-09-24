@@ -8,7 +8,7 @@ if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
 from core.identity_utils import identity_global_id
-from core.mediamtx_client import MediaMTXClient, camera_relay_url
+from core.mediamtx_client import MediaMTXClient, camera_preview_relay_url, camera_relay_url
 from core.metadata_fusion import MetadataFusion
 
 
@@ -64,6 +64,32 @@ class IdentityRuntimeTests(unittest.TestCase):
     def test_relay_url_is_camera_scoped(self):
         with mock.patch.dict(os.environ, {"MEDIAMTX_RTSP_ORIGIN": "rtsp://127.0.0.1:8554/"}):
             self.assertEqual("rtsp://127.0.0.1:8554/cam%2F1", camera_relay_url("cam/1"))
+            self.assertEqual("rtsp://127.0.0.1:8554/cam%2F1_preview", camera_preview_relay_url("cam/1"))
+
+    def test_preview_command_uses_low_resolution_relay_only(self):
+        values = {
+            "MEDIAMTX_RTSP_ORIGIN": "rtsp://127.0.0.1:8554",
+            "DISPLAY_PREVIEW_WIDTH": "640",
+            "DISPLAY_PREVIEW_HEIGHT": "360",
+            "DISPLAY_PREVIEW_FPS": "12",
+            "DISPLAY_PREVIEW_BITRATE_KBPS": "900",
+        }
+        with mock.patch.dict(os.environ, values, clear=False):
+            command = MediaMTXClient()._preview_command("cam1")
+        self.assertIn("scale=640:360", command[command.index("-vf") + 1])
+        self.assertIn("fps=12", command[command.index("-vf") + 1])
+        self.assertEqual("rtsp://127.0.0.1:8554/cam1", command[command.index("-i") + 1])
+        self.assertEqual("rtsp://127.0.0.1:8554/cam1_preview", command[-1])
+
+    def test_preview_process_is_not_started_twice(self):
+        client = MediaMTXClient()
+        process = mock.Mock()
+        process.poll.return_value = None
+        with mock.patch.dict(os.environ, {"DISPLAY_PREVIEW_ENABLED": "1"}, clear=False), \
+                mock.patch("core.mediamtx_client.subprocess.Popen", return_value=process) as popen:
+            self.assertTrue(client.ensure_preview("cam1"))
+            self.assertTrue(client.ensure_preview("cam1"))
+        popen.assert_called_once()
 
     def test_existing_mediamtx_path_is_not_recreated(self):
         client = MediaMTXClient("http://mediamtx/v3/config/paths")

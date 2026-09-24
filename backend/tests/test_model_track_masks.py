@@ -116,7 +116,7 @@ class MonitorDeploymentAPITests(unittest.TestCase):
         self.store.deploy.return_value = {"model_id": "model", "camera_ids": ["cam"], "all_cameras": False}
         response = self.client.post("/api/models/model/deploy", json={"camera_ids": ["cam"], "all_cameras": False})
         self.assertEqual(response.status_code, 200)
-        self.store.deploy.assert_called_once_with("model", ["cam"], False, {"cam"}, "admin")
+        self.store.deploy.assert_called_once_with("model", ["cam"], False, {"cam"}, "admin", {})
         self.assertEqual(self.client.post("/api/models/model/deploy", json={"unexpected": True}).status_code, 422)
         self.store.deploy.side_effect = WorkflowConflict("conflicting model")
         self.assertEqual(self.client.post("/api/models/model/deploy", json={}).status_code, 409)

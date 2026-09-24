@@ -1,7 +1,11 @@
-def hidden_monitor_cameras(deployment, workflows, registered):
+def hidden_monitor_cameras(deployments, workflows, registered):
     controlled, visible = set(), set()
     registered = set(registered)
-    if deployment:
+    if isinstance(deployments, dict):
+        deployments = [deployments]
+    for deployment in deployments or []:
+        if not deployment.get("enabled", True):
+            continue
         visible.update(registered if deployment.get("all_cameras") else set(deployment.get("camera_ids", [])) & registered)
     for workflow in workflows:
         nodes = workflow.get("definition", {}).get("nodes", [])
