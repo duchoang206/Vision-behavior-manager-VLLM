@@ -2,6 +2,7 @@ import time
 import numpy as np
 from typing import Any, Dict, List, Tuple, Optional
 from shapely.geometry import Point, Polygon, LineString
+from shapely.ops import unary_union
 
 class BehaviorAnalyticsEngine:
     """
@@ -20,18 +21,20 @@ class BehaviorAnalyticsEngine:
         # Tripwire cumulative counters: rule_id -> { "in": int, "out": int }
         self.tripwire_counts: Dict[str, dict] = {}
         
-        # Track history for line crossing: (cam_id, global_id) -> list of (timestamp, (x, y))
-        self.track_positions: Dict[Tuple[str, int], List[Tuple[float, Tuple[float, float]]]] = {}
+        # Track history for line crossing. A tracker id is only meaningful
+        # within one model process, so include model/generation in its identity.
+        self.track_positions: Dict[Tuple[Any, ...], List[Tuple[float, Tuple[float, float]]]] = {}
         
-        # Dwell tracking: (cam_id, rule_id, global_id) -> first_seen_timestamp
-        self.zone_occupancy: Dict[Tuple[str, str, int], float] = {}
+        # Dwell tracking: (cam_id, rule_id, model-scoped object identity) -> first_seen_timestamp
+        self.zone_occupancy: Dict[Tuple[Any, ...], float] = {}
         
         # Hysteresis state filter for ROI noise cancellation: (cam_id, rule_id) -> dict
         # { "status": "EMPTY"|"CARFULL", "occ_frames": int, "empty_frames": int, "occupant_ids": list }
         self.roi_states_filter: Dict[Tuple[str, str], dict] = {}
         
-        # Active alert cooldown to avoid duplicate alert flooding: (cam_id, rule_id, global_id) -> last_alert_time
-        self.alert_cooldowns: Dict[Tuple[str, str, int], float] = {}
+        # Active alert cooldown to avoid duplicate alert flooding. Keep this
+        # model-scoped as well: independently deployed models may both use id=1.
+        self.alert_cooldowns: Dict[Tuple[Any, ...], float] = {}
 
     def _target_matches(self, obj: dict, target_objects: List[str]) -> bool:
         if not target_objects:
@@ -65,12 +68,72 @@ class BehaviorAnalyticsEngine:
                 return True
         return False
 
+    @staticmethod
+    def _model_matches(obj: dict, rule: dict) -> bool:
+        """A rule must never consume detections from another deployed model."""
+        required = rule.get("model_id")
+        return not required or str(obj.get("model_id") or "") == str(required)
+
+    @staticmethod
+    def _mask_polygon(obj: dict):
+        mask = obj.get("mask")
+        rings = mask.get("polygons", []) if isinstance(mask, dict) else []
+        polygons = []
+        for ring in rings:
+            try:
+                if len(ring) >= 3:
+                    polygon = Polygon(ring)
+                    if not polygon.is_valid:
+                        polygon = polygon.buffer(0)
+                    if not polygon.is_empty and polygon.area > 0:
+                        polygons.append(polygon)
+            except Exception:
+                continue
+        try:
+            return unary_union(polygons) if polygons else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _is_fallen(obj: dict) -> bool:
+        if obj.get("fall_detected") or str(obj.get("posture", "")).lower() == "fallen":
+            return True
+        try:
+            if float(obj["h"]) > 0 and float(obj["w"]) / float(obj["h"]) > 1.3:
+                return True
+        except (KeyError, TypeError, ValueError):
+            return False
+        keypoints = obj.get("keypoints") or []
+        if len(keypoints) < 13:
+            return False
+        try:
+            shoulders = [(float(keypoints[index][0]), float(keypoints[index][1])) for index in (5, 6)
+                         if float(keypoints[index][2]) >= .35]
+            hips = [(float(keypoints[index][0]), float(keypoints[index][1])) for index in (11, 12)
+                    if float(keypoints[index][2]) >= .35]
+            if not shoulders or not hips:
+                return False
+            shoulder, hip = np.mean(shoulders, axis=0), np.mean(hips, axis=0)
+            angle = abs(np.degrees(np.arctan2(shoulder[1] - hip[1], shoulder[0] - hip[0])))
+            return min(angle, 180 - angle) < 30.0
+        except (IndexError, TypeError, ValueError):
+            return False
+
     def _numeric_id(self, value: Any) -> int:
         try:
             return int(value)
         except Exception:
             digits = "".join(ch for ch in str(value) if ch.isdigit())
             return int(digits) if digits else 0
+
+    @staticmethod
+    def _object_identity(obj: dict) -> Tuple[str, str, str]:
+        """Return a stable, model-scoped key for transient analytics state."""
+        return (
+            str(obj.get("model_id") or "default"),
+            str(obj.get("generation") or ""),
+            str(obj.get("id") or ""),
+        )
 
     def _get_fms_floor_objects(self) -> List[dict]:
         try:
@@ -154,7 +217,9 @@ class BehaviorAnalyticsEngine:
         """
         parsed_rules = []
         for r in rules_list:
-            rule_type = r.get("type") or r.get("rule_type") or "intrusion"
+            rule_type = (r.get("type") or r.get("rule_type") or "intrusion").lower()
+            if rule_type == "density":
+                rule_type = "crowd_density"
             rule_id = r.get("id", f"rule_{len(parsed_rules)+1}")
             points = r.get("points", [])
             coordinate_space = (r.get("coordinate_space") or "camera").lower()
@@ -174,9 +239,12 @@ class BehaviorAnalyticsEngine:
                 "threshold": threshold,
                 "direction": r.get("direction", "both"),
                 "coordinate_space": coordinate_space,
+                "model_id": r.get("model_id"),
+                "severity": r.get("severity", "warning"),
+                "cooldown_sec": float(r.get("cooldown_sec", 3.0)),
             }
             
-            if rule_type in ("intrusion", "dwell_time", "density", "occupancy") and len(points) >= 3:
+            if rule_type in ("intrusion", "dwell_time", "crowd_density", "occupancy") and len(points) >= 3:
                 try:
                     poly = Polygon(points)
                     if not poly.is_valid:
@@ -233,14 +301,15 @@ class BehaviorAnalyticsEngine:
         if not cam_rules:
             return triggered_events, self.get_tripwire_stats(cam_id), roi_states
             
-        current_gids_in_frame = set()
+        current_object_ids = set()
         
         # Prepare Bounding Box Polygons for all detected objects
         obj_polygons = []
         floor_objects = []
         for obj in objects:
             gid = obj["id"]
-            current_gids_in_frame.add(gid)
+            object_identity = self._object_identity(obj)
+            current_object_ids.add(object_identity)
             x, y, w, h = obj["x"], obj["y"], obj["w"], obj["h"]
             obj_cls = (obj.get("class") or "object").lower()
             
@@ -255,12 +324,15 @@ class BehaviorAnalyticsEngine:
                 
             obj_polygons.append({
                 "id": gid,
+                "object_identity": object_identity,
                 "class": obj_cls,
                 "label": obj.get("label"),
                 "bbox": [x, y, w, h],
                 "bottom_center": bottom_center,
                 "pt_geom": pt_geom,
-                "bbox_poly": bbox_poly
+                "bbox_poly": bbox_poly,
+                "mask_poly": self._mask_polygon(obj),
+                "raw": obj,
             })
 
             try:
@@ -277,7 +349,7 @@ class BehaviorAnalyticsEngine:
                 pass
             
             # Update trajectory for line crossing
-            pos_key = (cam_id, gid)
+            pos_key = (cam_id, *object_identity)
             if pos_key not in self.track_positions:
                 self.track_positions[pos_key] = []
             self.track_positions[pos_key].append((now, bottom_center))
@@ -295,7 +367,7 @@ class BehaviorAnalyticsEngine:
             for rule in cam_rules:
                 if rule.get("type") != "occupancy":
                     continue
-                if not self._target_matches(o, rule.get("target_objects", [])):
+                if not self._model_matches(o["raw"], rule) or not self._target_matches(o, rule.get("target_objects", [])):
                     continue
                     
                 c_poly = rule.get("camera_polygon") or (rule.get("polygon") if rule.get("coordinate_space") != "fms" else None)
@@ -307,7 +379,7 @@ class BehaviorAnalyticsEngine:
                 
                 if c_poly is not None and c_poly.area > 0:
                     if c_poly.intersects(o["bbox_poly"]):
-                        inter_a = c_poly.intersection(o["bbox_poly"]).area
+                        inter_a = c_poly.intersection(o["mask_poly"] or o["bbox_poly"]).area
                         ov_ratio = (inter_a / c_poly.area) * 100.0
                     dist_foot = c_poly.distance(o["pt_geom"])
                     if c_poly.contains(o["pt_geom"]) or c_poly.touches(o["pt_geom"]) or dist_foot < 0.025:
@@ -324,6 +396,7 @@ class BehaviorAnalyticsEngine:
                                 fms_match = True
                                 
                 thresh = float(rule.get("threshold", 15.0))
+                thresh = thresh * 100.0 if thresh <= 1.0 else thresh
                 if ov_ratio >= thresh or has_foot or fms_match:
                     score = ov_ratio + (60.0 if has_foot else 0.0) + (40.0 if fms_match else 0.0) - min(dist_foot * 100.0, 50.0)
                     if score > best_score:
@@ -332,7 +405,7 @@ class BehaviorAnalyticsEngine:
                         best_overlap = ov_ratio
                         
             if best_rid is not None:
-                best_roi_for_object[o["id"]] = (best_rid, best_score, best_overlap)
+                best_roi_for_object[o["object_identity"]] = (best_rid, best_score, best_overlap)
 
         # Process each rule for this camera
         for rule in cam_rules:
@@ -340,12 +413,14 @@ class BehaviorAnalyticsEngine:
             rule_type = rule["type"]
             target_objects = rule.get("target_objects", [])
             threshold = float(rule.get("threshold", 5.0))
+            overlap_threshold = threshold * 100.0 if threshold <= 1.0 else threshold
             coordinate_space = rule.get("coordinate_space", "camera")
             use_fms_space = rule_type == "occupancy" and rule.get("fms_polygon") is not None
             # --- 1. ROI OCCUPANCY MONITORING (CARFULL / EMPTY with Multi-Modal Vision + FMS Fusion) ---
-            if rule_type in ("intrusion", "dwell_time", "density", "occupancy"):
+            if rule_type in ("intrusion", "dwell_time", "crowd_density", "occupancy"):
                 raw_occupant_ids = []
                 raw_occupant_labels = []
+                raw_occupant_identities = []
                 max_overlap_ratio = 0.0
                 seen_candidates = set()
 
@@ -358,6 +433,10 @@ class BehaviorAnalyticsEngine:
                     seen_candidates.add(candidate_key)
                     raw_occupant_ids.append(candidate_id)
                     raw_occupant_labels.append(candidate_label)
+                    raw_occupant_identities.append(
+                        o.get("object_identity")
+                        or self._object_identity(o.get("raw") or o)
+                    )
 
                 camera_eval_poly = rule.get("camera_polygon") or (rule.get("polygon") if coordinate_space != "fms" else None)
                 fms_eval_poly = rule.get("fms_polygon") or (rule.get("polygon") if coordinate_space == "fms" else None)
@@ -366,19 +445,19 @@ class BehaviorAnalyticsEngine:
                 if camera_eval_poly is not None and camera_eval_poly.area > 0:
                     camera_roi_area = camera_eval_poly.area
                     for o in obj_polygons:
-                        if not self._target_matches(o, target_objects):
+                        if not self._model_matches(o["raw"], rule) or not self._target_matches(o, target_objects):
                             continue
 
                         # If occupancy rule, only consider the object if this ROI is its dominant/primary slot
                         if rule_type == "occupancy":
-                            best_match = best_roi_for_object.get(o["id"])
+                            best_match = best_roi_for_object.get(o["object_identity"])
                             if not (best_match is not None and best_match[0] == rule_id):
                                 continue
 
                         overlap_ratio = 0.0
                         try:
                             if camera_eval_poly.intersects(o["bbox_poly"]):
-                                inter_area = camera_eval_poly.intersection(o["bbox_poly"]).area
+                                inter_area = camera_eval_poly.intersection(o["mask_poly"] or o["bbox_poly"]).area
                                 overlap_ratio = (inter_area / camera_roi_area) * 100.0
                         except Exception:
                             overlap_ratio = 0.0
@@ -394,7 +473,7 @@ class BehaviorAnalyticsEngine:
                             or dist_to_contact < 0.025
                         )
 
-                        if overlap_ratio >= threshold or is_point_inside:
+                        if overlap_ratio >= overlap_threshold or is_point_inside:
                             remember_occupant(o)
 
                 # 1.2 Floor / FMS Telemetry Fusion (AMR state & projected coordinates with 0.35m tolerance buffer)
@@ -404,10 +483,10 @@ class BehaviorAnalyticsEngine:
                     transform = rule.get("camera_to_fms_matrix")
                     if transform is not None:
                         for o in obj_polygons:
-                            if not self._target_matches(o, target_objects):
+                            if not self._model_matches(o["raw"], rule) or not self._target_matches(o, target_objects):
                                 continue
                             if rule_type == "occupancy":
-                                best_match = best_roi_for_object.get(o["id"])
+                                best_match = best_roi_for_object.get(o["object_identity"])
                                 if not (best_match is not None and best_match[0] == rule_id):
                                     continue
                             mapped = self._transform_camera_point_to_fms(transform, o["bottom_center"])
@@ -422,6 +501,8 @@ class BehaviorAnalyticsEngine:
 
                     candidates.extend(self._get_fms_floor_objects())
                     for o in candidates:
+                        if rule.get("model_id") and ("raw" not in o or not self._model_matches(o["raw"], rule)):
+                            continue
                         if not self._target_matches(o, target_objects):
                             continue
                         if buffered_fms_poly.contains(o["pt_geom"]) or buffered_fms_poly.touches(o["pt_geom"]):
@@ -430,7 +511,10 @@ class BehaviorAnalyticsEngine:
                                 max_overlap_ratio = 100.0
                 
                 # Instantaneous frame occupancy condition
-                instant_occupied = len(raw_occupant_ids) > 0 or max_overlap_ratio >= threshold
+                if rule_type == "crowd_density":
+                    instant_occupied = len(raw_occupant_ids) >= max(1, int(threshold))
+                else:
+                    instant_occupied = len(raw_occupant_ids) > 0 or max_overlap_ratio >= overlap_threshold
                 
                 # Temporal Hysteresis Filter (Chống nhiễu rung lắc)
                 state_key = (cam_id, rule_id)
@@ -454,8 +538,10 @@ class BehaviorAnalyticsEngine:
                         filter_state["status"] = "CARFULL"
                         
                         # Trigger Alarm Event
-                        cooldown_key = (cam_id, rule_id, raw_occupant_ids[0] if raw_occupant_ids else 0)
-                        if now - self.alert_cooldowns.get(cooldown_key, 0) > 3.0:
+                        occupant_identity = (raw_occupant_identities[0]
+                                              if raw_occupant_identities else ("default", "", "0"))
+                        cooldown_key = (cam_id, rule_id, *occupant_identity)
+                        if now - self.alert_cooldowns.get(cooldown_key, 0) > rule.get("cooldown_sec", 3.0):
                             self.alert_cooldowns[cooldown_key] = now
                             occ_str = ", ".join(raw_occupant_labels or [f"#{i}" for i in raw_occupant_ids])
                             triggered_events.append({
@@ -463,8 +549,10 @@ class BehaviorAnalyticsEngine:
                                 "global_id": raw_occupant_ids[0] if raw_occupant_ids else 0,
                                 "rule_id": rule_id,
                                 "rule_type": rule_type,
-                                "severity": "critical",
-                                "description": f"🚨 Ô vị trí '{rule['name']}' chuyển sang CÓ HÀNG (CARFULL) bởi {occ_str}",
+                                "severity": rule.get("severity", "warning"),
+                                "description": (f"🚨 Xâm nhập vùng cấm '{rule['name']}' bởi {occ_str}" if rule_type == "intrusion"
+                                                else f"🚨 Mật độ tại '{rule['name']}' là {len(raw_occupant_ids)}" if rule_type == "crowd_density"
+                                                else f"🚨 Ô vị trí '{rule['name']}' chuyển sang CÓ HÀNG (CARFULL) bởi {occ_str}"),
                                 "timestamp": int(now * 1000)
                             })
                 else:
@@ -487,13 +575,30 @@ class BehaviorAnalyticsEngine:
                     "rule_type": rule_type,
                     "coordinate_space": "hybrid" if rule.get("camera_points") and rule.get("fms_points") else coordinate_space,
                     "overlap_ratio": round(max_overlap_ratio, 2),
+                    "model_id": rule.get("model_id"),
                 })
+
+                if rule_type == "dwell_time":
+                    for object_id, object_identity in zip(raw_occupant_ids, raw_occupant_identities):
+                        dwell_key = (cam_id, rule_id, *object_identity)
+                        started = self.zone_occupancy.setdefault(dwell_key, now)
+                        cooldown_key = (cam_id, rule_id, *object_identity)
+                        if now - started >= threshold and now - self.alert_cooldowns.get(cooldown_key, 0) >= rule.get("cooldown_sec", 3.0):
+                            self.alert_cooldowns[cooldown_key] = now
+                            triggered_events.append({
+                                "cam_id": cam_id, "global_id": object_id, "rule_id": rule_id,
+                                "rule_type": "dwell_time", "severity": rule.get("severity", "warning"),
+                                "description": f"Đối tượng #{object_id} dừng quá {threshold:.1f}s tại '{rule['name']}'",
+                                "timestamp": int(now * 1000),
+                            })
 
             # --- 2. TRIPWIRE / LINE CROSSING ---
             elif rule_type == "tripwire" and rule.get("line"):
                 line_geom = rule["line"]
                 for o in obj_polygons:
-                    pos_key = (cam_id, o["id"])
+                    if not self._model_matches(o["raw"], rule) or not self._target_matches(o, target_objects):
+                        continue
+                    pos_key = (cam_id, *o["object_identity"])
                     if len(self.track_positions.get(pos_key, [])) >= 2:
                         prev_pos = self.track_positions[pos_key][-2][1]
                         motion_seg = LineString([prev_pos, o["bottom_center"]])
@@ -507,8 +612,8 @@ class BehaviorAnalyticsEngine:
                             cross_prod = line_vec[0] * motion_vec[1] - line_vec[1] * motion_vec[0]
                             direction = "in" if cross_prod > 0 else "out"
                             
-                            cooldown_key = (cam_id, rule_id, o["id"])
-                            if now - self.alert_cooldowns.get(cooldown_key, 0) > 2.0:
+                            cooldown_key = (cam_id, rule_id, *o["object_identity"])
+                            if now - self.alert_cooldowns.get(cooldown_key, 0) > rule.get("cooldown_sec", 1.0):
                                 self.alert_cooldowns[cooldown_key] = now
                                 self.tripwire_counts[rule_id][direction] = self.tripwire_counts[rule_id].get(direction, 0) + 1
                                 
@@ -517,7 +622,7 @@ class BehaviorAnalyticsEngine:
                                     "global_id": o["id"],
                                     "rule_id": rule_id,
                                     "rule_type": "tripwire",
-                                    "severity": "info",
+                                    "severity": rule.get("severity", "info"),
                                     "direction": direction,
                                     "description": f"Vượt vạch ảo '{rule['name']}' ({direction.upper()}) bởi đối tượng #{o['id']}",
                                     "counts": dict(self.tripwire_counts[rule_id]),
@@ -525,17 +630,38 @@ class BehaviorAnalyticsEngine:
                                     "timestamp": int(now * 1000)
                                 })
 
+            # --- 3. FALL DETECTION (pose posture must persist past threshold) ---
+            elif rule_type == "fall_detection":
+                for o in obj_polygons:
+                    if not self._model_matches(o["raw"], rule) or not self._target_matches(o, target_objects):
+                        continue
+                    dwell_key = (cam_id, rule_id, *o["object_identity"])
+                    if not self._is_fallen(o["raw"]):
+                        self.zone_occupancy.pop(dwell_key, None)
+                        continue
+                    started = self.zone_occupancy.setdefault(dwell_key, now)
+                    cooldown_key = (cam_id, rule_id, *o["object_identity"])
+                    if now - started < threshold or now - self.alert_cooldowns.get(cooldown_key, 0) < rule.get("cooldown_sec", 3.0):
+                        continue
+                    self.alert_cooldowns[cooldown_key] = now
+                    triggered_events.append({
+                        "cam_id": cam_id, "global_id": o["id"], "rule_id": rule_id,
+                        "rule_type": "fall_detection", "severity": rule.get("severity", "emergency"),
+                        "description": f"⚠️ PHÁT HIỆN TÉ NGÃ: track #{o['id']} tại '{rule['name']}'",
+                        "bbox": o["bbox"], "timestamp": int(now * 1000),
+                    })
+
         # Cleanup expired track positions
-        self._cleanup(now, current_gids_in_frame, cam_id)
+        self._cleanup(now, current_object_ids, cam_id)
         
         return triggered_events, self.get_tripwire_stats(cam_id), roi_states
 
-    def _cleanup(self, now: float, current_gids: set, cam_id: str):
-        keys_to_del = [k for k in self.track_positions.keys() if k[0] == cam_id and k[1] not in current_gids]
+    def _cleanup(self, now: float, current_object_ids: set, cam_id: str):
+        keys_to_del = [k for k in self.track_positions.keys() if k[0] == cam_id and k[1:] not in current_object_ids]
         for k in keys_to_del:
             self.track_positions.pop(k, None)
             
-        zone_keys_to_del = [k for k in self.zone_occupancy.keys() if k[0] == cam_id and k[2] not in current_gids]
+        zone_keys_to_del = [k for k in self.zone_occupancy.keys() if k[0] == cam_id and k[2:] not in current_object_ids]
         for k in zone_keys_to_del:
             self.zone_occupancy.pop(k, None)
 

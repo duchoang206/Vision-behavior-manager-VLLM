@@ -16,6 +16,7 @@ from src.controller.rack_association import RackAssociationEngine
 from core.camera_calibrator import camera_calibrator
 from core.identity_utils import robot_number_from_label
 from core.robot_spatial_identity import robot_identity, robot_spatial_identity, spatial_verification
+from core.rack_position_stabilizer import RackPositionStabilizer
 from core.metadata_broadcaster import close_metadata_socket
 
 try:
@@ -37,6 +38,7 @@ class DigitalTwinBridge:
         self.vision_robots: Dict[str, Dict[str, Any]] = {}
         self.persons: Dict[str, Dict[str, Any]] = {}
         self.racks: Dict[str, Dict[str, Any]] = {}
+        self.rack_position_stabilizer = RackPositionStabilizer()
         
         # Track history for velocity & heading estimation: { entity_id: [(time, x, y), ...] }
         self.position_history: Dict[str, List[Tuple[float, float, float]]] = {}
@@ -44,6 +46,12 @@ class DigitalTwinBridge:
         # Background streaming task
         self._streaming_task: Optional[asyncio.Task] = None
         self._is_running = False
+
+    def _stabilize_rack_position(self, rack_id: str, cam_id: str, x: float, z: float, now: float,
+                                 snapped_to_slot: bool = False, is_carried: bool = False):
+        return self.rack_position_stabilizer.update(
+            rack_id, cam_id, x, z, now, snapped_to_slot=snapped_to_slot, is_carried=is_carried,
+        )
 
     def _canonical_robot_id(self, fms_id: str) -> str:
         raw = str(fms_id or "").strip()
@@ -235,8 +243,13 @@ class DigitalTwinBridge:
             except Exception:
                 pass
                 
-            final_x = snapped_pos[0] if snapped_pos is not None else world_x
-            final_z = snapped_pos[1] if snapped_pos is not None else world_z
+            previous_rack = self.racks.get(rack_id, {})
+            final_x, final_z = snapped_pos if snapped_pos is not None else (world_x, world_z)
+            (final_x, final_z), position_stable = self._stabilize_rack_position(
+                rack_id, cam_id, final_x, final_z, now,
+                snapped_to_slot=snapped_pos is not None,
+                is_carried=previous_rack.get("status") == "CARRIED",
+            )
             
             self.racks[rack_id] = {
                 "id": rack_id,
@@ -246,6 +259,7 @@ class DigitalTwinBridge:
                 "carried_by": None,
                 "roi_slot": slot_name,
                 "snapped_to_fms": bool(snapped_pos),
+                "position_stable": position_stable,
                 "cam_id": cam_id,
                 "track_id": track_id,
                 "last_seen": now
@@ -323,6 +337,8 @@ class DigitalTwinBridge:
             stale_keys = [k for k, v in d.items() if now - v.get("last_seen", 0) > timeout_sec]
             for k in stale_keys:
                 del d[k]
+                if d is self.racks:
+                    self.rack_position_stabilizer.forget(k)
 
     def get_latest_telemetry_payload(self, max_age: float = 0.15) -> dict:
         now = time.time()
