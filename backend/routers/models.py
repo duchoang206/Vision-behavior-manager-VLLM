@@ -23,6 +23,16 @@ class MonitorDeployment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     camera_ids: list[str] = Field(default_factory=list, max_length=256)
     all_cameras: bool = True
+    confidence_thresholds: dict = Field(default_factory=dict)
+
+
+class DeploymentCreate(MonitorDeployment):
+    model_id: str = Field(min_length=32, max_length=32)
+
+
+class DeploymentEnabled(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
 
 def create_model_router(registry, live_status, cameras=lambda: []):
     router = APIRouter(prefix="/api/models", tags=["TensorRT models"], dependencies=[Depends(require_dashboard_user)])
@@ -40,7 +50,24 @@ def create_model_router(registry, live_status, cameras=lambda: []):
     @router.get("")
     def list_models():
         return {"models": registry.list(), "runtime": live_status(), "chunk_size": registry.chunk_size,
-                "max_size": registry.max_size, "deployment": registry.deployment()}
+                "max_size": registry.max_size, "deployment": registry.deployment(),
+                "deployments": registry.deployments()}
+
+    @router.get("/deployments")
+    def list_deployments():
+        return {"deployments": registry.deployments()}
+
+    @router.post("/deployments")
+    def create_deployment(request: DeploymentCreate, actor=Depends(require_dashboard_user)):
+        return execute(lambda: registry.deploy(request.model_id, request.camera_ids, request.all_cameras, cameras(), actor, request.confidence_thresholds))
+
+    @router.patch("/deployments/{deployment_id}")
+    def set_deployment_enabled(deployment_id: str, request: DeploymentEnabled, actor=Depends(require_dashboard_user)):
+        return execute(lambda: registry.set_deployment_enabled(deployment_id, request.enabled, actor))
+
+    @router.delete("/deployments/{deployment_id}")
+    def remove_deployment(deployment_id: str, actor=Depends(require_dashboard_user)):
+        return execute(lambda: registry.stop_deployment(actor, deployment_id))
 
     @router.delete("/deployment")
     def stop_deployment(actor=Depends(require_dashboard_user)):
@@ -48,7 +75,7 @@ def create_model_router(registry, live_status, cameras=lambda: []):
 
     @router.post("/{model_id}/deploy")
     def deploy(model_id: str, request: MonitorDeployment, actor=Depends(require_dashboard_user)):
-        return execute(lambda: registry.deploy(model_id, request.camera_ids, request.all_cameras, cameras(), actor))
+        return execute(lambda: registry.deploy(model_id, request.camera_ids, request.all_cameras, cameras(), actor, request.confidence_thresholds))
 
     @router.post("", status_code=201)
     def upload(request: ModelUpload, actor=Depends(require_dashboard_user)):
