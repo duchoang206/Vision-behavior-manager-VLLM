@@ -44,7 +44,7 @@ def decode_pose_tensor(values, frame_width, frame_height, network_width=640, net
     return output
 
 
-def frame_poses(frame_meta, frame_width, frame_height):
+def frame_poses(frame_meta, frame_width, frame_height, network_width=640, network_height=640):
     import pyds
 
     metadata = frame_meta.frame_user_meta_list
@@ -59,7 +59,7 @@ def frame_poses(frame_meta, frame_width, frame_height):
                     raise ValueError("Pose output must be FP32")
                 pointer = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
                 values = np.ctypeslib.as_array(pointer, shape=(int(np.prod(dimensions)),)).reshape(dimensions)
-                return decode_pose_tensor(values, frame_width, frame_height)
+                return decode_pose_tensor(values, frame_width, frame_height, network_width, network_height)
         try:
             metadata = metadata.next
         except StopIteration:
@@ -113,3 +113,14 @@ def attach_poses(detections, poses):
         )
         assigned_detections.add(detection_index)
         assigned_poses.add(pose_index)
+
+
+def attach_poses_to_tracks(tracks, poses):
+    """Attach decoded Pose tensor landmarks to custom-worker JSON tracks."""
+    detections = [{"bbox": [track["x"], track["y"], track["w"], track["h"]]} for track in tracks]
+    attach_poses(detections, poses)
+    for track, detection in zip(tracks, detections):
+        track["keypoints"] = detection.get("keypoints", [])
+        if track["keypoints"]:
+            track["pose_source"] = "deepstream_uploaded_yolo_pose_tensorrt"
+    return tracks

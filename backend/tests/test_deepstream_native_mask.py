@@ -26,7 +26,7 @@ class NativeMaskContractTests(unittest.TestCase):
         bitmap[4:20, 8:24] = 1.0
         result = mask_from_object_meta(_SyntheticObject(_SyntheticMaskParams(bitmap)), None)
         self.assertIsNotNone(result)
-        self.assertEqual(result["source"], "deepstream_masktracker")
+        self.assertEqual(result["source"], "deepstream_yolo_seg")
         self.assertTrue(result["polygons"])
         self.assertTrue(all(0 <= value <= 1 for ring in result["polygons"] for point in ring for value in point))
         self.assertIn("contract_iou", result)
@@ -61,4 +61,3 @@ class NativeMaskContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

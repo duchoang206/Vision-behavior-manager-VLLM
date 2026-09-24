@@ -25,9 +25,9 @@ def polygon_contract_iou(binary, polygons):
 def mask_from_object_meta(obj_meta, pyds):
     """Return a bbox-relative polygon mask or ``None``.
 
-    DeepStream owns the SAM2 inference and stores the result in
-    ``NvDsObjectMeta.mask_params``.  Only the compact polygon conversion is
-    performed here so the existing WebSocket contract remains unchanged.
+    The YOLO-Seg C++ parser stores an instance bitmap in
+    ``NvDsObjectMeta.mask_params``. Only compact contour conversion happens in
+    Python, so no PyTorch/SAM2 worker is in the realtime path.
     """
 
     params = getattr(obj_meta, "mask_params", None)
@@ -46,7 +46,7 @@ def mask_from_object_meta(obj_meta, pyds):
         binary = (bitmap >= threshold).astype(np.uint8)
         if not binary.any():
             return None
-        result = mask_payload(binary, source="deepstream_masktracker", confidence=1.0)
+        result = mask_payload(binary, source="deepstream_yolo_seg", confidence=1.0)
         if not result.get("polygons"):
             return None
         result["contract_iou"] = round(polygon_contract_iou(binary, result["polygons"]), 6)

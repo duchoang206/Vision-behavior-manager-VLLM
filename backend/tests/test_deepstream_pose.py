@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from core.deepstream_pose import attach_poses, decode_pose_tensor
+from core.deepstream_pose import attach_poses, attach_poses_to_tracks, decode_pose_tensor
 
 
 class DeepStreamPoseTests(unittest.TestCase):
@@ -62,6 +62,12 @@ class DeepStreamPoseTests(unittest.TestCase):
         values[6, :] = 10
         poses = decode_pose_tensor(values, 1280, 720)
         self.assertEqual(0, poses[0]["keypoints"][0][2])
+
+    def test_uploaded_pose_tracks_receive_keypoints(self):
+        tracks = [{"x": .4, "y": .25, "w": .2, "h": .5, "keypoints": []}]
+        attach_poses_to_tracks(tracks, decode_pose_tensor(self.tensor(), 1280, 720))
+        self.assertEqual(17, len(tracks[0]["keypoints"]))
+        self.assertEqual("deepstream_uploaded_yolo_pose_tensorrt", tracks[0]["pose_source"])
 
 
 if __name__ == "__main__":
