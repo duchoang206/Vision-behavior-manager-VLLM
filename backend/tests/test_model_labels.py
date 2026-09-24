@@ -179,6 +179,29 @@ class ModelLabelGateTests(unittest.TestCase):
         self.assertFalse(gate.filter("cam", [tracked(detected_at=1000)], 1400)[0])
         self.assertFalse(gate.filter("cam", [tracked(x=.8, detected_at=1430)], 1430)[0])
 
+    def test_robot_bbox_stabilization_deadband_and_rate_limiting(self):
+        gate = ModelTrackGate()
+        # Frame 1: birth (hits=1)
+        gate.filter("cam", [tracked(category="robot", x=0.20, y=0.30, w=0.10, h=0.12, detected_at=1000)], 1000)
+        # Frame 2: confirmed (hits=2)
+        out2, _ = gate.filter("cam", [tracked(category="robot", x=0.20, y=0.30, w=0.10, h=0.12, detected_at=1030)], 1030)
+        self.assertTrue(out2)
+        self.assertAlmostEqual(out2[0]["w"], 0.10, places=3)
+        self.assertAlmostEqual(out2[0]["h"], 0.12, places=3)
+
+        # Frame 3: Micro-jitter (<4% change in width/height) -> deadband locks dimensions
+        out3, _ = gate.filter("cam", [tracked(category="robot", x=0.20, y=0.30, w=0.103, h=0.117, detected_at=1060)], 1060)
+        self.assertTrue(out3)
+        self.assertAlmostEqual(out3[0]["w"], 0.10, places=3)
+        self.assertAlmostEqual(out3[0]["h"], 0.12, places=3)
+
+        # Frame 4: Sudden spike (+30% width) -> rate-limiting clamps to <= 8% change
+        out4, _ = gate.filter("cam", [tracked(category="robot", x=0.20, y=0.30, w=0.130, h=0.156, detected_at=1090)], 1090)
+        self.assertTrue(out4)
+        # Since clamped to 1.08 max and alpha=0.25: 0.10 + 0.25 * (0.108 - 0.10) = 0.102
+        self.assertLess(out4[0]["w"], 0.105)
+        self.assertLess(out4[0]["h"], 0.126)
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])
