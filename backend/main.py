@@ -19,8 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from core.database import db_manager
-os.environ["DISABLE_DEEPSTREAM_MODEL"] = "1"
-os.environ["DISABLE_CUSTOM_DETECTOR"] = "1"  # Custom env to disable custom_detector
 from core.deepstream_engine import deepstream_manager, sanitize_rtsp_url
 from core.camera_calibrator import camera_calibrator
 from core.behavior_analytics import behavior_engine
@@ -93,6 +91,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 ENABLE_CPU_TRACKER_FALLBACK = os.getenv("ENABLE_CPU_TRACKER_FALLBACK", "1").lower() not in {"0", "false", "no"}
 
+
+def legacy_deepstream_enabled() -> bool:
+    """The bundled Pose sample is opt-in; uploaded deployments own inference."""
+    return os.getenv("ENABLE_LEGACY_DEEPSTREAM_PIPELINE", "0").lower() in {"1", "true", "yes"}
+
 # In-memory registry of active cameras
 cameras: Dict[str, dict] = {}
 
@@ -120,12 +123,13 @@ def validate_workflow(definition):
     return validate_definition(definition, [camera["id"] for camera in resources["cameras"]], resources["labels"],
                                [camera["id"] for camera in resources["cameras"] if camera["calibrated"]], resources["recording_enabled"], resources.get("models", []))
 
-def _clear_custom_detector_metadata(camera_id):
-    metadata_fusion.remove_source(camera_id, "custom_deepstream")
+def _clear_custom_detector_metadata(camera_id, model_id=None):
+    source = f"custom_deepstream:{model_id}" if model_id else "custom_deepstream"
+    metadata_fusion.remove_source(camera_id, source)
     latest_objects_by_cam[camera_id] = []
     latest_metadata_at_by_cam[camera_id] = time.time()
     metadata_broadcaster.publish({"source": "model_stopped", "timestamp": time.time() * 1000,
-                                  "streams": [{"cam_id": camera_id, "objects": [], "model_id": None}]})
+                                  "streams": [{"cam_id": camera_id, "objects": [], "model_id": model_id}]})
 
 workflow_store = WorkflowStore(db_manager)
 workflow_runtime = WorkflowRuntime(workflow_store, validate_workflow, lambda event: broadcast_event_sync(event))
@@ -133,7 +137,7 @@ model_registry = ModelRegistry(db_manager)
 model_label_store = ModelLabelStore(db_manager)
 custom_detector = CustomDetector(model_registry, workflow_store, lambda: set(cameras),
                                  lambda payload: broadcast_metadata_sync(payload),
-                                 lambda camera_id: _clear_custom_detector_metadata(camera_id),
+                                 _clear_custom_detector_metadata,
                                  lambda camera_id: _stop_template_identity_tracker(camera_id))
 app.include_router(create_workflow_router(workflow_store, workflow_runtime, workflow_resources, validate_workflow))
 app.include_router(create_model_router(model_registry, custom_detector.status, lambda: set(cameras)))
@@ -146,7 +150,7 @@ def _wait_for_gpu_build_window():
     active_learning_worker.preempt_for_live()
     deadline = time.monotonic() + float(os.getenv("DEEPSTREAM_BUILD_WAIT_TIMEOUT", "1800"))
     while time.monotonic() < deadline:
-        if not model_registry.deployment() and not workflow_store.active() and not custom_detector.status().get("running"):
+        if not model_registry.deployments(enabled_only=True) and not workflow_store.active() and not custom_detector.status().get("running"):
             return
         time.sleep(.5)
     raise TimeoutError("TensorRT build được hoãn vì DeepStream vẫn đang chạy; dừng deployment rồi build lại.")
@@ -633,11 +637,16 @@ def broadcast_metadata_sync(payload: dict):
                 for obj in incoming:
                     obj.setdefault("category", (obj.get("class") or "object").lower())
                     obj.setdefault("observed_at", payload.get("timestamp", int(now * 1000)))
+                    if payload.get("source") == "custom_deepstream":
+                        obj.setdefault("generation", st.get("generation"))
                 incoming, spatial_rejections = robot_spatial_identity.filter_objects(cam_key, incoming, now=now)
                 st["identity_rejected_labels"] = sorted(set(st.get("identity_rejected_labels", []) + spatial_rejections))
                 if registered_robots:
                     online_robot_calibration.observe(cam_key, incoming, registered_robots, now=now)
-                merged = metadata_fusion.update(cam_key, payload.get("source", "deepstream"), incoming)
+                fusion_source = payload.get("source", "deepstream")
+                if fusion_source == "custom_deepstream" and st.get("model_id"):
+                    fusion_source = f"custom_deepstream:{st['model_id']}"
+                merged = metadata_fusion.update(cam_key, fusion_source, incoming)
                 merged, merged_rejections = robot_spatial_identity.filter_objects(cam_key, merged, now=now)
                 st["identity_rejected_labels"] = sorted(set(st["identity_rejected_labels"] + merged_rejections))
                 for obj in merged:
@@ -651,6 +660,18 @@ def broadcast_metadata_sync(payload: dict):
                 latest_objects_by_cam[cam_key] = merged
                 st["objects"] = merged
                 latest_metadata_at_by_cam[str(cam_id)] = now
+                if payload.get("source") == "custom_deepstream":
+                    try:
+                        triggered_events, tripwire_stats, roi_states = behavior_engine.process_frame(cam_key, merged)
+                        alert_ids = {event.get("global_id") for event in triggered_events}
+                        for obj in merged:
+                            obj["alert"] = obj.get("id") in alert_ids
+                        st["tripwire_stats"] = tripwire_stats
+                        st["rois"] = roi_states
+                        for event in triggered_events:
+                            broadcast_event_sync(event)
+                    except Exception:
+                        logging.exception("Custom model behavior engine failed for %s", cam_key)
                 if payload.get("source") == "identity_template":
                     from src.controller.registry import target_registry
                     for obj in incoming:
@@ -848,6 +869,7 @@ async def startup_event():
 
         if is_reachable:
             c["status"] = "online"
+            await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
             initial_sources.append((cam_id, rtsp_url))
             print(f"[Main] Camera {cam_id} reachable - will add to pipeline.", flush=True)
             _start_cpu_tracker_fallback(cam_id, rtsp_url)
@@ -856,7 +878,10 @@ async def startup_event():
             offline_cameras.append((cam_id, rtsp_url))
             print(f"[Main] Camera {cam_id} unreachable at startup - kept in DB and will retry.", flush=True)
 
-    deepstream_manager.start(initial_sources=initial_sources if initial_sources else None)
+    if legacy_deepstream_enabled():
+        deepstream_manager.start(initial_sources=initial_sources if initial_sources else None)
+    else:
+        print("[Main] Legacy DeepStream Pose sample disabled; inference starts only after an uploaded model is deployed.", flush=True)
 
     if offline_cameras:
         asyncio.ensure_future(_retry_offline_cameras(offline_cameras))
@@ -878,6 +903,7 @@ async def shutdown_event():
     await asyncio.to_thread(model_registry.stop)
     await asyncio.to_thread(workflow_runtime.stop)
     await asyncio.to_thread(ffmpeg_recorder.stop)
+    await asyncio.to_thread(mediamtx_client.stop_previews)
     await metadata_broadcaster.stop()
     if calibration_task:
         calibration_task.cancel()
@@ -912,8 +938,10 @@ async def _retry_offline_cameras(offline_list: list, interval: int = 30):
 
             if is_reachable:
                 cameras[cam_id]["status"] = "online"
+                await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
                 print(f"[Main] Camera {cam_id} is now reachable - adding to pipeline.", flush=True)
-                deepstream_manager.add_source(cam_id, rtsp_url)
+                if legacy_deepstream_enabled():
+                    deepstream_manager.add_source(cam_id, rtsp_url)
                 _start_cpu_tracker_fallback(cam_id, rtsp_url)
             else:
                 cameras[cam_id]["status"] = "offline"
@@ -987,7 +1015,9 @@ async def add_camera(request: CameraAddRequest):
     ffmpeg_recorder.add_camera(cam_id)
     # 4. A configured camera is persisted even if the RTSP stream is temporarily offline.
     if is_valid:
-        deepstream_manager.add_source(cam_id, clean_url)
+        await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
+        if legacy_deepstream_enabled():
+            deepstream_manager.add_source(cam_id, clean_url)
         _start_cpu_tracker_fallback(cam_id, clean_url)
     else:
         asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
@@ -1015,6 +1045,7 @@ async def update_camera(cam_id: str, request: CameraUpdateRequest):
         cam["name"] = request.name
     if request.rtsp_url:
         clean_url = sanitize_rtsp_url(request.rtsp_url)
+        await asyncio.to_thread(mediamtx_client.stop_preview, cam_id)
         cam["rtsp_url"] = clean_url
         cam["status"] = "offline"
         try:
@@ -1033,7 +1064,9 @@ async def update_camera(cam_id: str, request: CameraUpdateRequest):
 
         if is_valid:
             cam["status"] = "online"
-            deepstream_manager.add_source(cam_id, clean_url)
+            await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
+            if legacy_deepstream_enabled():
+                deepstream_manager.add_source(cam_id, clean_url)
             _start_cpu_tracker_fallback(cam_id, clean_url)
         else:
             asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
@@ -1050,6 +1083,7 @@ async def delete_camera(cam_id: str):
         raise HTTPException(status_code=404, detail="Camera not found")
 
     ffmpeg_recorder.remove_camera(cam_id)
+    await asyncio.to_thread(mediamtx_client.stop_preview, cam_id)
     if cam_id in cameras:
         deepstream_manager.delete_source(cam_id)
         _stop_cpu_tracker_fallback(cam_id)
@@ -1356,7 +1390,7 @@ def _validate_mask_bbox(bbox):
 @app.get("/api/registry/mask/status")
 async def mask_status():
     return dict(registered_target_mask_segmenter.status(), enabled=False, mode="uploaded_model_only",
-                reason="Label đã ngừng sử dụng; SAM2 chỉ chạy theo model đã deploy.",
+                reason="Label đã ngừng sử dụng; Monitor dùng YOLO-Seg native từ model đã deploy.",
                 runtime=custom_detector.status(), identity_metrics=registered_identity_metrics.status())
 
 @app.post("/api/registry/mask/preview", dependencies=[Depends(reject_legacy_label_registration)])

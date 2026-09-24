@@ -22,8 +22,8 @@ type VideoAttempt = {
   statsPending: boolean;
 };
 
-const CONNECT_TIMEOUT_MS = 6500;
-const STALL_TIMEOUT_MS = 1500;
+const CONNECT_TIMEOUT_MS = 10000;
+const STALL_TIMEOUT_MS = 10000;
 const RETRY_MIN_MS = 250;
 const RETRY_MAX_MS = 4000;
 
@@ -150,7 +150,7 @@ export function connectRealtimeVideo({ video, url, isVisible, onPlayingChange, o
         if (peer.connectionState === 'failed' || peer.connectionState === 'closed' || peer.iceConnectionState === 'failed' || peer.iceConnectionState === 'closed') {
           retry(session);
         } else if (peer.iceConnectionState === 'disconnected' || peer.connectionState === 'disconnected') {
-          if (session.disconnectTimer === null) session.disconnectTimer = setTimeout(() => retry(session), 1000);
+          if (session.disconnectTimer === null) session.disconnectTimer = setTimeout(() => retry(session), 10000);
         } else if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
           if (session.disconnectTimer !== null) clearTimeout(session.disconnectTimer);
           session.disconnectTimer = null;

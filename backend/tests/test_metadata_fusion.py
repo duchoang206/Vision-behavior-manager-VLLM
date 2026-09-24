@@ -50,6 +50,14 @@ class MetadataFusionTests(unittest.TestCase):
         self.fusion.update("first", "identity_template", [robot()], now=1)
         self.assertEqual([], self.fusion.update("second", "deepstream", [], now=1.1))
 
+    def test_multiple_model_sources_keep_one_object_per_label(self):
+        first = {"id": 3, "class": "Robot_2001", "category": "robot", "model_id": "first", "confidence": .7}
+        second = {"id": 4, "class": "Robot_2001", "category": "robot", "model_id": "second", "confidence": .9}
+        self.fusion.update("cam", "custom_deepstream:first", [first], now=1)
+        objects = self.fusion.update("cam", "custom_deepstream:second", [second], now=1.1)
+        self.assertEqual(1, len(objects))
+        self.assertEqual(4, objects[0]["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

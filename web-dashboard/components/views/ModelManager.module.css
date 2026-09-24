@@ -26,4 +26,15 @@
 .cameraChoice { display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer; }
 .cameraChoice input { accent-color: #14a08c; }
 .root .message { color: #20a489; }
+.thresholdSection { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.thresholdTitle { font-size: 13px; font-weight: 600; display: block; margin-bottom: 6px; }
+.thresholdGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 8px; margin-bottom: 12px; }
+.thresholdCard { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.thresholdLabelRow { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 600; }
+.thresholdSliderRow { display: flex; align-items: center; gap: 8px; }
+.thresholdSliderRow input[type="range"] { flex: 1; accent-color: #14a08c; padding: 0; cursor: pointer; }
+.thresholdSliderRow input[type="number"] { width: 55px; padding: 4px; text-align: center; font-size: 11px; }
+.camOverrideBox { background: rgba(20, 160, 140, 0.05); border: 1px dashed var(--border); border-radius: 8px; padding: 12px; margin-top: 10px; }
+.camOverrideHeader { display: flex; align-items: center; gap: 10px; font-size: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.camOverrideHeader select { border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
 @media (max-width: 950px) { .layout { grid-template-columns: 1fr; } }

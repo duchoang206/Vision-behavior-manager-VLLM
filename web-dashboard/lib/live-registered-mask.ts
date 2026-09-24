@@ -55,8 +55,7 @@ export function updateLiveRegisteredMask(
     ? `${observation.model_id}:${observation.id}:${observation.class}` : observation.label?.trim().toLowerCase();
   const box: MaskBox = [observation.x, observation.y, observation.w, observation.h];
   const receivedAt = metadataReceivedAt(now, observation.observed_at, sentAt, transportAgeMs);
-  if (!identity || !/robot|rack|agv|amr|forklift|shelf|pallet|kệ/i.test(observation.category || observation.class)
-    || observation.mask_revoked || observation.identity_verified === false
+  if (!identity || observation.mask_revoked || observation.identity_verified === false
     || /lost|removed|deleted/i.test(observation.tracking_state || '')
     || !box.every(Number.isFinite) || box[2] <= 0 || box[3] <= 0
     || now - receivedAt > MASK_BRIDGE_MS) return null;
@@ -67,7 +66,7 @@ export function updateLiveRegisteredMask(
     return isLiveRegisteredMask(retained, now, observation.model_id ? MODEL_MASK_MAX_AGE_MS : MASK_BRIDGE_MS) ? retained : null;
   }
 
-  const propagated = observation.mask?.source === 'sam2_optical_flow';
+  const propagated = observation.mask?.source === 'optical_flow';
   if (validRegisteredMask(observation.mask) && (!observation.mask_stale || propagated)
     && (!observation.model_id || Number.isFinite(observation.mask.observed_at))) {
     const repeated = retained?.observedAt !== undefined && retained.observedAt === observation.observed_at;

@@ -19,6 +19,7 @@ import MonitorChatAssistant from './MonitorChatAssistant';
 type TrackedObject = {
   id: number;
   model_id?: string;
+  generation?: string;
   identity_verified?: boolean;
   label_prompt_id?: string;
   category?: string;
@@ -44,6 +45,9 @@ type TrackedObject = {
   delta_distance_m?: number;
   fms_pos?: [number, number, number];
   keypoints?: number[][];
+  obb?: { points: number[][]; angle?: number };
+  attributes?: Record<string, string | boolean | number>;
+  alert?: boolean;
   posture?: string;
   fall_detected?: boolean;
   fall_event?: boolean;
@@ -89,6 +93,9 @@ type InterpolatedTrack = {
   delta_distance_m?: number;
   fms_pos?: [number, number, number];
   keypoints?: number[][];
+  obb?: { points: number[][]; angle?: number };
+  attributes?: Record<string, string | boolean | number>;
+  alert?: boolean;
   posture?: string;
   fall_detected?: boolean;
   world_position?: [number | null, number, number | null];
@@ -228,7 +235,9 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
     if (!video) return;
     return connectRealtimeVideo({
       video,
-      url: `http://${hostName}:8081/${cam.id}/whep`,
+      // The browser consumes a lightweight transcoded preview. DeepStream keeps
+      // reading the full-resolution relay for model inference.
+      url: `http://${hostName}:8081/${encodeURIComponent(`${cam.id}_preview`)}/whep`,
       isVisible: () => visibleRef.current,
       onPlayingChange: setIsPlaying,
       onReset: () => {
@@ -335,34 +344,41 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
                 ? 1
                 : Math.max(0.35, 1 - ((age - TRACK_FADE_START_MS) / (TRACK_HOLD_MS - TRACK_FADE_START_MS)));
 
-              track.curX = track.targetX;
-              track.curY = track.targetY;
-              track.curW = track.targetW;
-              track.curH = track.targetH;
+              // Class & label formatting
+              const rawClass = (track.class || 'Object').toLowerCase();
+              const isRobot = rawClass.includes('robot');
+
+              if (isRobot) {
+                track.curX += (track.targetX - track.curX) * 0.70;
+                track.curY += (track.targetY - track.curY) * 0.70;
+                track.curW += (track.targetW - track.curW) * 0.35;
+                track.curH += (track.targetH - track.curH) * 0.35;
+              } else {
+                track.curX = track.targetX;
+                track.curY = track.targetY;
+                track.curW = track.targetW;
+                track.curH = track.targetH;
+              }
 
               const px = mapVideoX(track.curX);
               const py = mapVideoY(track.curY);
               const pw = track.curW * videoDrawW;
               const ph = track.curH * videoDrawH;
 
-              // Class & label formatting
-              const rawClass = (track.class || 'Object').toLowerCase();
-              const isRobot = rawClass.includes('robot');
               const isRack = rawClass.includes('rack');
               const isPerson = rawClass.includes('person') || rawClass.includes('human') || rawClass.includes('worker');
-              const isFallen = Boolean(track.fall_detected || track.posture === 'fallen');
+              const isFallen = Boolean(track.fall_detected || track.posture === 'fallen' || track.alert);
               const hasCustomLabel = hasRegisteredLabel(track.label);
-              const registeredTarget = Boolean(track.model_id) && (hasCustomLabel || isRobotClass(track.class));
               const mask = isLiveRegisteredMask(track.maskFrame, now)
                 ? track.maskFrame.mask : null;
-              const drawMask = registeredTarget && Boolean(mask);
+              const drawMask = Boolean(mask);
               if (!shouldShowTrackIdentity(track.class, track.model_id)) {
                 return;
               }
               const displayClass = isRobot ? 'robot' : (isRack ? 'rack' : rawClass);
               const label = hasCustomLabel ? track.label!
                 : `${displayClass} #${track.local_id ?? track.id}`;
-              const displayLabel = registeredTarget && !drawMask ? `${label} · chờ mask` : label;
+              const displayLabel = label;
 
               const colors = segmentationColors(track.label || `${track.model_id}:${track.local_id ?? track.id}`, isFallen);
               const strokeColor = isPerson && !isFallen ? '#4ade80' : colors.stroke;
@@ -391,8 +407,17 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
                 ctx.lineWidth = 1.4;
                 ctx.strokeStyle = strokeColor;
                 ctx.stroke(path);
-              } else if (!isPerson && !registeredTarget) {
+              } else if (!isPerson) {
                 ctx.strokeRect(px, py, pw, ph);
+              }
+              if (track.obb?.points?.length === 4) {
+                const points = track.obb.points;
+                ctx.beginPath();
+                points.forEach((point, index) => {
+                  const x = mapVideoX(point[0]); const y = mapVideoY(point[1]);
+                  if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.closePath(); ctx.stroke();
               }
               ctx.shadowBlur = 0;
 
@@ -419,7 +444,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               }
 
               ctx.fillStyle = fillColor;
-              if (!drawMask && !isPerson && !registeredTarget) ctx.fillRect(px, py, pw, ph);
+              if (!drawMask && !isPerson) ctx.fillRect(px, py, pw, ph);
 
               ctx.font = `${isPerson ? '500 10px' : '600 11px'} "Space Grotesk", sans-serif`;
               const textMetrics = ctx.measureText(displayLabel);
@@ -444,6 +469,15 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               ctx.fillStyle = '#f1f5f9';
               ctx.textBaseline = 'middle';
               ctx.fillText(displayLabel, tagX + tagPadding + 9, tagY + tagH / 2, Math.max(1, tagW - tagPadding * 2 - 9));
+              if (track.attributes && Object.keys(track.attributes).length) {
+                const badges = Object.entries(track.attributes).map(([key, value]) => `${key}: ${value === true ? 'OK' : value === false ? 'THIẾU' : value}`).join(' · ');
+                ctx.font = '500 9px "Space Grotesk", sans-serif';
+                const badgeW = Math.min(width, ctx.measureText(badges).width + 12);
+                const badgeY = Math.min(height - 16, tagY + tagH + 3);
+                ctx.fillStyle = 'rgba(9, 16, 30, .88)'; ctx.fillRect(tagX, badgeY, badgeW, 16);
+                ctx.fillStyle = Object.values(track.attributes).some(value => value === false) ? '#ef4444' : '#e2e8f0';
+                ctx.fillText(badges, tagX + 6, badgeY + 8, badgeW - 10);
+              }
               ctx.restore();
             });
           }
@@ -527,7 +561,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
           position: 'relative',
           width: '100%',
           aspectRatio: '16/9',
-          background: isDark ? '#09090b' : '#f97316',
+          background: '#09090b',
           overflow: 'hidden',
           cursor: 'crosshair'
         }}
@@ -544,7 +578,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               position: 'absolute',
               top: 0,
               left: 0,
-              background: isDark ? '#09090b' : '#f97316'
+              background: '#09090b'
             }}
           />
 
@@ -584,8 +618,12 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
             gap: '6px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.5)'
           }}>
-            <span style={{ color: '#22d3ee', fontSize: '12px' }}>🎯</span>
-            <span>{metadataCount > 0 ? `Đang bám vết ${metadataCount} đối tượng` : 'Đang nối lại metadata tracking'}</span>
+            <span style={{ color: metadataCount > 0 ? '#22d3ee' : '#eab308', fontSize: '12px' }}>
+              {metadataCount > 0 ? '🎯' : '⚠️'}
+            </span>
+            <span>
+              {metadataCount > 0 ? `Đang bám vết ${metadataCount} đối tượng` : 'Đang nối lại metadata tracking'}
+            </span>
           </div>
         )}
 
@@ -811,16 +849,17 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                 tracks.forEach((track, trackId) => {
                   const removed = stream.objects?.some(obj => obj.id === trackId
                     && /lost|removed|deleted/i.test(obj.tracking_state || ''));
-                  const invalidated = stream.monitor_hidden || revokedIds.has(trackId)
-                    || (track.model_id && stream.model_id && track.model_id !== stream.model_id)
-                    || (track.generation && stream.generation && track.generation !== stream.generation)
+                  const streamApplies = !stream.model_id || track.model_id === stream.model_id;
+                  const matchingObject = streamObjects.find(obj => obj.id === trackId && obj.model_id === track.model_id);
+                  const invalidated = (streamApplies && stream.monitor_hidden) || (streamApplies && revokedIds.has(trackId))
+                    || (streamApplies && track.generation && matchingObject?.generation && track.generation !== matchingObject.generation)
                     || (track.labelPrompt && activeLabelNames && !activeLabelNames.has(track.label?.trim().toLowerCase() || ''));
                   const replaced = track.model_id && track.label && streamObjects.some(obj => obj.id !== trackId
                     && obj.model_id === track.model_id && obj.identity_verified
                     && obj.label?.trim().toLowerCase() === track.label?.trim().toLowerCase());
                   const expired = track.model_id ? !isLiveRegisteredMask(track.maskFrame, now)
                     : !isRobotClass(track.class) || now - track.lastUpdated > TRACK_HOLD_MS;
-                  if (removed || invalidated || replaced || (!incomingIds.has(trackId) && expired)) {
+                  if ((streamApplies && removed) || invalidated || (streamApplies && replaced) || (streamApplies && !incomingIds.has(trackId) && expired)) {
                     tracks.delete(trackId);
                     if (floorTrackMap.current.get(trackId)?.cam === camId) floorTrackMap.current.delete(trackId);
                   }
@@ -864,7 +903,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                   if (!tracks.has(obj.id)) {
                     tracks.set(obj.id, {
                       id: obj.id, local_id: obj.local_id, class: obj.class, label: obj.label, model_id: obj.model_id,
-                      generation: stream.generation, labelPrompt: Boolean(obj.label_prompt_id),
+                      generation: obj.generation || stream.generation, labelPrompt: Boolean(obj.label_prompt_id),
                       maskFrame, observedAt: obj.observed_at,
                       curX: obj.x, curY: obj.y, curW: obj.w, curH: obj.h,
                       targetX: obj.x, targetY: obj.y, targetW: obj.w, targetH: obj.h,
@@ -877,6 +916,9 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                       delta_distance_m: obj.delta_distance_m,
                       fms_pos: obj.fms_pos,
                       keypoints: obj.keypoints,
+                      obb: obj.obb,
+                      attributes: obj.attributes,
+                      alert: obj.alert,
                       posture: obj.posture,
                       fall_detected: obj.fall_detected,
                       world_position: obj.world_position,
@@ -888,7 +930,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     track.local_id = obj.local_id;
                     track.label = obj.label;
                     track.model_id = obj.model_id;
-                    track.generation = stream.generation;
+                    track.generation = obj.generation || stream.generation;
                     track.labelPrompt = Boolean(obj.label_prompt_id);
                     track.maskFrame = maskFrame;
                     track.observedAt = obj.observed_at;
@@ -904,6 +946,9 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     if (obj.delta_distance_m !== undefined) track.delta_distance_m = obj.delta_distance_m;
                     if (obj.fms_pos !== undefined) track.fms_pos = obj.fms_pos;
                     if (obj.keypoints !== undefined) track.keypoints = obj.keypoints;
+                    if (obj.obb !== undefined) track.obb = obj.obb;
+                    if (obj.attributes !== undefined) track.attributes = obj.attributes;
+                    if (obj.alert !== undefined) track.alert = obj.alert;
                     if (obj.posture !== undefined) track.posture = obj.posture;
                     if (obj.fall_detected !== undefined) track.fall_detected = obj.fall_detected;
                     if (obj.world_position !== undefined) track.world_position = obj.world_position;

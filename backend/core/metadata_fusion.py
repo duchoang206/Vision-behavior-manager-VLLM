@@ -50,6 +50,26 @@ def label_registered_people(people, identities):
     return labeled
 
 
+def one_object_per_class(objects):
+    """Resolve duplicate classes from multiple detector sources for one camera."""
+    best = {}
+    for obj in objects:
+        key = str(obj.get("label") or obj.get("class") or "").strip().casefold()
+        if not key:
+            continue
+        try:
+            priority = (
+                obj.get("tracking_state") != "predicted",
+                float(obj.get("confidence", 0) or 0),
+                float(obj.get("w", 0) or 0) * float(obj.get("h", 0) or 0),
+            )
+        except (TypeError, ValueError):
+            priority = (False, float("-inf"), float("-inf"))
+        if key not in best or priority > best[key][0]:
+            best[key] = (priority, obj)
+    return [item[1] for item in best.values()]
+
+
 class MetadataFusion:
     def __init__(self, ttl=1.0, template_ttl=None):
         self.ttl = ttl
@@ -67,7 +87,7 @@ class MetadataFusion:
                     if is_person(obj) and obj.get("label") and obj.get("tracking_state") == "tracked"])
             elif source in {"deepstream", "cpu_fallback"}:
                 sources[source] = (now, [dict(obj, label=None, category="person") for obj in objects if is_person(obj)])
-            elif source == "custom_deepstream":
+            elif source == "custom_deepstream" or source.startswith("custom_deepstream:"):
                 from core.model_track_masks import model_identity
                 sources[source] = (now, [dict(obj, label=obj.get("label") if obj.get("identity_verified") is True
                     and obj.get("identity_source") == "model_label_triplet" and obj.get("model_id")
@@ -79,13 +99,15 @@ class MetadataFusion:
                 if now - sources[name][0] > source_ttl:
                     del sources[name]
             people = sources.get("deepstream", sources.get("cpu_fallback", (now, [])))[1]
-            custom = sources.get("custom_deepstream", (now, []))[1]
-            if "custom_deepstream" in sources:
+            custom_sources = [items for name, (_, items) in sources.items() if name == "custom_deepstream" or name.startswith("custom_deepstream:")]
+            custom = [obj for items in custom_sources for obj in items]
+            if custom_sources:
                 people = [obj for obj in custom if is_person(obj)]
-            if "custom_deepstream" not in sources:
+            if not custom_sources:
                 people = label_registered_people(people, sources.get("identity_people", (now, []))[1])
-            registered = [] if "custom_deepstream" in sources else sources.get("identity_template", (now, []))[1]
-            return [dict(obj) for obj in people + registered + [obj for obj in custom if not is_person(obj)]]
+            registered = [] if custom_sources else sources.get("identity_template", (now, []))[1]
+            merged = people + registered + [obj for obj in custom if not is_person(obj)]
+            return [dict(obj) for obj in one_object_per_class(merged)]
 
     def remove_source(self, cam_id, source):
         with self.lock:
