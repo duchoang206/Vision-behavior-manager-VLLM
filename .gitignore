@@ -2,6 +2,10 @@
 __pycache__/
 *.py[cod]
 *.so
+*.o
+*.bak*
+backend/models/uploads/**/nvinfer-*.txt
+backend/models/uploads/**/runtime-*.json
 *.egg
 *.egg-info/
 dist/
