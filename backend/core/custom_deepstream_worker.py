@@ -9,6 +9,40 @@ import time
 
 from core.model_track_masks import model_identity
 from core.deepstream_native_mask import mask_from_object_meta
+from core.deepstream_geometry import clamp_normalized_polygon, normalize_stream_bbox, unletterbox_bbox
+
+
+def limit_one_object_per_class(objects):
+    """Keep the most confident object for each model label in one camera frame."""
+    best = {}
+    for obj in objects:
+        label = str(obj.get("class") or obj.get("label") or "").casefold()
+        if not label:
+            continue
+        try:
+            score = float(obj.get("confidence", 0) or 0)
+            area = float(obj.get("w", 0) or 0) * float(obj.get("h", 0) or 0)
+        except (TypeError, ValueError):
+            score, area = -math.inf, -math.inf
+        if not math.isfinite(score):
+            score = -math.inf
+        if not math.isfinite(area):
+            area = -math.inf
+        previous = best.get(label)
+        try:
+            previous_score = float(previous.get("confidence", 0) or 0) if previous else -math.inf
+            previous_area = (float(previous.get("w", 0) or 0) * float(previous.get("h", 0) or 0)
+                             if previous else -math.inf)
+        except (TypeError, ValueError):
+            previous_score, previous_area = -math.inf, -math.inf
+        if not math.isfinite(previous_score):
+            previous_score = -math.inf
+        if not math.isfinite(previous_area):
+            previous_area = -math.inf
+        if previous is None or (score, area) > (previous_score, previous_area):
+            best[label] = obj
+    selected = list(best.values())
+    return selected, len(objects) - len(selected)
 
 
 def run(settings):
@@ -25,7 +59,6 @@ def run(settings):
     mailbox = {}
     mutex = threading.Lock()
     metadata_jobs = {}
-    latest_metadata = {}
     metadata_mutex = threading.Lock()
     metadata_wake = threading.Event()
     wake = threading.Event()
@@ -34,11 +67,17 @@ def run(settings):
     model_id = settings["model_id"]
     labels = settings["labels"]
     categories = settings.get("categories", [label.lower() for label in labels])
-    native_masktracker = bool(settings.get("native_masktracker"))
+    model_type = str(settings.get("model_type", "detect")).lower()
+    stream_width = float(settings.get("stream_width", 1280))
+    stream_height = float(settings.get("stream_height", 720))
+    network_shape = settings.get("network_shape", [3, 640, 640])
+    network_width, network_height = float(network_shape[-1]), float(network_shape[-2])
+    metadata_coordinates = str(settings.get("metadata_coordinates", "stream")).lower()
     confidence_cache = {}
     output_lock = threading.Lock()
     from core.model_track_gate import ModelTrackGate
-    gate = ModelTrackGate()
+    from core.deepstream_pose import attach_poses_to_tracks, frame_poses
+    gate = ModelTrackGate(confidence_thresholds=settings.get("confidence_thresholds", {}))
 
     def emit(prefix, payload):
         if baseline and baseline.enabled() and prefix == 'RSKY_META ':
@@ -49,45 +88,28 @@ def run(settings):
         with output_lock:
             print(encoded, flush=True)
 
-    from core.model_sam2 import ModelSAM2
-    def publish_ready_mask(camera_id, frame_id, captured_at, obj, mask, identity):
-        if not mask:
-            return
-        with metadata_mutex:
-            context = latest_metadata.get(camera_id)
-            if not context:
-                return
-            stream, rejected, detector_candidates, verification_candidates = context
-            stream["objects"] = attach_masks(camera_id, stream["objects"], stream["frame_id"], time.time() * 1000)
-            stream["segmentation"] = segmentation.status(camera_id)
-            stream["segmentation"]["detector_rejected"] = rejected
-            stream["segmentation"]["detector_candidates"] = detector_candidates
-            stream["segmentation"]["verification_candidates"] = verification_candidates
-            stream["segmentation"]["visible_labels"] = sorted({item["label"] for item in stream["objects"] if item.get("identity_verified")})
-            stream["segmentation"]["mask_backend"] = "deepstream_masktracker" if native_masktracker else "python_sam2"
-            with mutex:
-                mailbox[camera_id] = {"source": "custom_deepstream", "timestamp": time.time() * 1000, "streams": [stream]}
-            wake.set()
-
-    segmentation = ModelSAM2(settings["label_directory"], lambda payload: emit("RSKY_REPLY ", payload), publish_ready_mask)
-
     def attach_masks(camera_id, objects, frame_id, captured_at):
-        attached = segmentation.attach(camera_id, objects, frame_id, captured_at)
-        if not native_masktracker:
-            return attached
-        for obj in attached:
+        """Attach YOLO-Seg contours emitted by nvinfer to the stable Web contract."""
+        for obj in objects:
             native = obj.pop("native_mask", None)
             if not native:
                 continue
             x, y, width, height = (float(obj[name]) for name in ("x", "y", "w", "h"))
-            polygons = [[[min(1.0, max(0.0, x + point[0] * width)),
-                          min(1.0, max(0.0, y + point[1] * height))]
-                         for point in ring] for ring in native["polygons"]]
+            polygons = [clamp_normalized_polygon([[x + point[0] * width, y + point[1] * height] for point in ring])
+                        for ring in native["polygons"]]
             obj["mask"] = dict(native, polygons=polygons, frame_id=frame_id,
                                 observed_at=captured_at, attached_at=captured_at,
-                                source="deepstream_masktracker")
+                                source="deepstream_yolo_seg")
             obj["mask_stale"] = False
-        return attached
+        return objects
+
+    def segmentation_status():
+        return {
+            "ready": True,
+            "backend": "yolo_seg_native" if model_type == "segment" else "none",
+            "mask_backend": "yolo_seg_native" if model_type == "segment" else "none",
+            "model_type": model_type,
+        }
     reload_pending = {}
     reload_lock = threading.Lock()
 
@@ -125,25 +147,16 @@ def run(settings):
                     GLib.idle_add(reload_engine, request)
                     continue
                 if request.get("action") == "reload_labels":
-                    try:
-                        if not segmentation.metric:
-                            raise RuntimeError("SAM2 đang khởi động; gallery sẽ được nạp khi sẵn sàng.")
-                        result = segmentation.metric.reload(int(request["revision"]))
-                        activation = request.get('activation')
-                        if activation and activation.get('camera_id') in cameras:
-                            try:
-                                result['activation'] = segmentation.activate_label(activation['camera_id'], activation['sample_id'])
-                            except (ValueError, KeyError) as error:
-                                result['activation'] = dict(mode='tracking_queued', error=str(error))
-                        segmentation.wake.set()
-                        emit("RSKY_REPLY ", dict(id=request["id"], result=result))
-                    except (RuntimeError, TimeoutError, ValueError) as error:
-                        emit("RSKY_REPLY ", dict(id=request["id"], error=str(error)))
+                    # Native YOLO-Seg has no Python prompt/gallery worker. Keep
+                    # the command protocol non-breaking for label clients.
+                    emit("RSKY_REPLY ", dict(id=request["id"], result={
+                        "mode": "native_yolo_seg", "revision": request.get("revision"), "activation": None,
+                    }))
                     continue
                 if request.get("camera_id") not in cameras:
                     emit("RSKY_REPLY ", dict(id=request.get("id"), error="Camera không thuộc deployment."))
                     continue
-                segmentation.request(request)
+                emit("RSKY_REPLY ", dict(id=request.get("id"), error="YOLO-Seg native không nhận prompt mask; hãy train/deploy model segmentation."))
             except (ValueError, TypeError):
                 print("Invalid Label command", file=sys.stderr, flush=True)
 
@@ -179,13 +192,10 @@ def run(settings):
     tracker_props = {
         "ll-lib-file": "/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so",
         "ll-config-file": settings["tracker"],
-        "tracker-width": 960 if native_masktracker else 640,
-        "tracker-height": 544 if native_masktracker else 384,
+        "tracker-width": 640,
+        "tracker-height": 384,
         "gpu-id": 0,
     }
-    if native_masktracker:
-        tracker_props["user-meta-pool-size"] = 32
-        tracker_props["compute-hw"] = 1
     tracker = element("nvtracker", "tracker", tracker_props)
     sink = element("fakesink", "sink", {"sync": False, "async": False, "enable-last-sample": False})
     converter = element("nvvideoconvert", "rgba-gpu", {"nvbuf-memory-type": 2})
@@ -240,10 +250,17 @@ def run(settings):
                     observed_at = cached[1]
                     if 0 <= class_id < len(labels) and track_id != 2**64 - 1 and now - observed_at < .3:
                         rect = obj.rect_params
-                        left = min(1., max(0., float(rect.left) / 1280))
-                        top = min(1., max(0., float(rect.top) / 720))
-                        width = min(1. - left, max(0., float(rect.width) / 1280))
-                        height = min(1. - top, max(0., float(rect.height) / 720))
+                        if metadata_coordinates == "network":
+                            left, top, width, height = unletterbox_bbox(
+                                rect.left, rect.top, rect.width, rect.height,
+                                stream_width, stream_height, network_width, network_height,
+                            )
+                        else:
+                            # NvDsObjectMeta.rect_params has already been transformed
+                            # back from the model's letterbox into muxer/stream space.
+                            left, top, width, height = normalize_stream_bbox(
+                                rect.left, rect.top, rect.width, rect.height, stream_width, stream_height,
+                            )
                         score = cached[0] if confidence < 0 else confidence
                         if all(math.isfinite(value) for value in (left, top, width, height, score)) and width > 0 and height > 0:
                             identity = f"{model_id}:{settings['generation']}:{camera_id}:{track_id}"
@@ -254,8 +271,8 @@ def run(settings):
                                             "x": left, "y": top, "w": width, "h": height, "confidence": score,
                                             "tracking_state": "tracked" if confidence >= 0 else "predicted", "observed_at": now * 1000,
                                             "detected_at": observed_at * 1000,
-                                            "frame_width": 1280, "frame_height": 720, "keypoints": []}
-                            if native_masktracker:
+                                            "frame_width": int(stream_width), "frame_height": int(stream_height), "keypoints": []}
+                            if model_type == "segment":
                                 native_mask = mask_from_object_meta(obj, pyds)
                                 if native_mask:
                                     item["native_mask"] = native_mask
@@ -264,23 +281,21 @@ def run(settings):
                         object_list = object_list.next
                     except StopIteration:
                         break
+                if model_type == "pose" and objects:
+                    poses = frame_poses(frame, stream_width, stream_height, network_width, network_height)
+                    attach_poses_to_tracks(objects, poses)
+                objects, rejected_by_class = limit_one_object_per_class(objects)
                 detector_candidates = [{"track_id": obj["local_id"], "class_name": obj["class"],
                                         "confidence": round(obj["confidence"], 4)} for obj in objects[:32]]
-                policies = {category: segmentation.metric.policy(category) for category in set(categories)} if segmentation.metric else {}
-                verification_categories = {category for category, policy in policies.items()
-                                           if policy["required"] and policy["available"] and not policy["error"]}
-                snapshot_objects = [dict(obj) for obj in objects] if segmentation.labels.needs_frame(camera_id) else None
-                objects, rejected = gate.filter(camera_id, objects, now * 1000, verification_categories)
+                objects, rejected = gate.filter(camera_id, objects, now * 1000)
+                if rejected_by_class:
+                    rejected["duplicate_class"] = rejected_by_class
                 verification_candidates = sum(bool(obj.get("requires_label_verification")) for obj in objects)
                 stream = {"cam_id": camera_id, "frame_id": int(frame.frame_num), "frame_pts_ns": int(frame.buf_pts),
                           "source_id": int(frame.source_id), "generation": settings["generation"],
                           "model_version": settings.get("model_version", "original"), "model_id": model_id,
                           "objects": [dict(obj) for obj in objects]}
-                frame_info = {key: stream[key] for key in ("source_id", "generation", "model_version", "model_id", "frame_pts_ns")}
-                segmentation.submit(buffer, int(frame.batch_id), camera_id, stream["frame_id"], now * 1000, objects,
-                                    frame_info=frame_info, snapshot_objects=snapshot_objects)
                 with metadata_mutex:
-                    latest_metadata[camera_id] = (stream, rejected, detector_candidates, verification_candidates)
                     metadata_jobs[camera_id] = (stream, now * 1000, rejected, detector_candidates,
                                                  verification_candidates)
                 metadata_wake.set()
@@ -318,12 +333,11 @@ def run(settings):
                 camera_id = stream["cam_id"]
                 objects = stream["objects"]
                 stream["objects"] = attach_masks(camera_id, objects, stream["frame_id"], captured_at)
-                stream["segmentation"] = segmentation.status(camera_id)
+                stream["segmentation"] = segmentation_status()
                 stream["segmentation"]["detector_rejected"] = rejected
                 stream["segmentation"]["detector_candidates"] = detector_candidates
                 stream["segmentation"]["verification_candidates"] = verification_candidates
-                stream["segmentation"]["visible_labels"] = sorted({obj["label"] for obj in stream["objects"] if obj.get("identity_verified")})
-                stream["segmentation"]["mask_backend"] = "deepstream_masktracker" if native_masktracker else "python_sam2"
+                stream["segmentation"]["visible_labels"] = []
                 with mutex:
                     mailbox[camera_id] = {"source": "custom_deepstream", "timestamp": captured_at, "streams": [stream]}
                 wake.set()
@@ -372,7 +386,6 @@ def run(settings):
         wake.set()
         metadata_wake.set()
         pipeline.set_state(Gst.State.NULL)
-        segmentation.stop()
         metadata_thread.join(timeout=1)
     if failed:
         raise RuntimeError(failed[-1])
