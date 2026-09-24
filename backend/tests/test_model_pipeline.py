@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from core.dashboard_auth import require_dashboard_user
 from core.metadata_fusion import MetadataFusion
-from core.model_contract import inspect_onnx, parse_labels
+from core.model_contract import infer_config, inspect_onnx, parse_labels
 from core.workflow_definition import validate_definition
 from core.workflow_runtime import GraphEvaluator, WorkflowRuntime
 from routers.models import create_model_router
@@ -63,6 +63,20 @@ class ModelContractTests(unittest.TestCase):
         self.onnx.helper.set_model_props(self.model, {'task': 'detect', 'names': "{0: 'person'}"})
         with self.assertRaises(ValueError):
             self.inspect()
+
+    def test_pose_contract_generates_native_deepstream_config(self):
+        tensor = self.onnx.helper.make_tensor('values', self.onnx.TensorProto.FLOAT, [1, 56, 8400], [0.] * (56 * 8400))
+        graph = self.onnx.helper.make_graph([self.onnx.helper.make_node('Constant', [], ['output0'], value=tensor)], 'pose',
+            [self.onnx.helper.make_tensor_value_info('images', self.onnx.TensorProto.FLOAT, [1, 3, 640, 640])],
+            [self.onnx.helper.make_tensor_value_info('output0', self.onnx.TensorProto.FLOAT, [1, 56, 8400])])
+        model = self.onnx.helper.make_model(graph, opset_imports=[self.onnx.helper.make_opsetid('', 17)])
+        self.onnx.helper.set_model_props(model, {'task': 'pose', 'names': "{0: 'person'}"})
+        self.onnx.save(model, str(self.path))
+        metadata = inspect_onnx(self.path)
+        config = infer_config('/models/pose', metadata, '/opt/visionmanager/libperson_pose_parser.so')
+        self.assertEqual('pose', metadata['model_type'])
+        self.assertIn('parse-bbox-func-name=NvDsInferParseYoloV8Pose', config)
+        self.assertIn('output-tensor-meta=1', config)
 
     def test_external_weights_rejected_without_reading(self):
         tensor = self.model.graph.node[0].attribute[0].t
