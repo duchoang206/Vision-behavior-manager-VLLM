@@ -43,33 +43,28 @@ services:
       - ./backend/data:/app/data
       - ${RECORDINGS_HOST_DIR:-./recordings}:/var/vms/recordings
       - ./backend/models_config/DeepStream-Yolo/nvdsinfer_custom_impl_Yolo/libnvdsinfer_custom_impl_Yolo.so:/opt/visionmanager/libnvdsinfer_custom_impl_Yolo.so:ro
-      - ./backend/models_config/libperson_pose_parser.so:/opt/visionmanager/libperson_pose_parser.so:ro
     environment:
       - PYTHONUNBUFFERED=1
       - DISPLAY=$DISPLAY
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - DISABLE_DEEPSTREAM_GST=0
-      - DISABLE_DEEPSTREAM_MODEL=1
-      - DEEPSTREAM_NATIVE_MASKTRACKER=1
+      - DISABLE_CUSTOM_DETECTOR=0
+      # The bundled yolo11l-pose sample is not an active detector. Inference
+      # begins only when an uploaded model is Ready and deployed from the UI.
+      - ENABLE_LEGACY_DEEPSTREAM_PIPELINE=0
       - ENABLE_DEEPSTREAM_DISPLAY=0
       - ENABLE_CPU_TRACKER_FALLBACK=0
       - CPU_TRACKER_PERSON_ONLY=1
-      - POSE_MODEL_PATH=/app/models/yolo11l-pose.pt
       - FMS_IP=192.168.5.105
       - FMS_MQTT_PORT=1883
       - FMS_ORIGIN_X=185.0
       - FMS_ORIGIN_Y=194.5
       - FMS_LAYOUT_DEPTH=18.0
-      - DEEPSTREAM_ONNX_FILE=/app/models/yolo11l-pose.onnx
-      - DEEPSTREAM_ENGINE_FILE=/app/models/yolo11l-pose_b2_gpu0_fp16.engine
-      - DEEPSTREAM_LABELS_FILE=/app/models_config/labels.txt
-      - DEEPSTREAM_BATCH_SIZE=2
       # Project-local NvDCF config: GPU correlation tracker without the
       # optional sample ReID engine that is not shipped in the container.
       - DEEPSTREAM_TRACKER_CONFIG=/app/models_config/tracker_config.yml
       - REID_ONNX_FILE=/app/models/reid_512.onnx
-      - CPU_TRACKER_MODEL_PATH=/app/models/yolo11l-pose.pt
       - RECORDINGS_DIR=/var/vms/recordings
       - SYSTEM_LOG_DIR=/app/data/system_logs
       - SYSTEM_LOG_RETENTION_DAYS=7
@@ -84,6 +79,20 @@ services:
       - REGISTERED_MASK_TARGET_FPS=15
       - REGISTERED_MASK_FLOW_MAX_AGE=1.8
       - REGISTERED_MASK_HOLD_SEC=0.25
+      # Monitor receives this low-bitrate relay; DeepStream input stays 1280x720.
+      - DISPLAY_PREVIEW_ENABLED=1
+      - DISPLAY_PREVIEW_WIDTH=640
+      - DISPLAY_PREVIEW_HEIGHT=360
+      - DISPLAY_PREVIEW_FPS=25
+      - DISPLAY_PREVIEW_BITRATE_KBPS=1200
+      - DISPLAY_PREVIEW_ENCODER=libx264
+      - DISPLAY_PREVIEW_PRESET=veryfast
+      # Filter camera-projection noise for stationary racks in the 3D Twin.
+      - RACK_POSITION_DEADBAND_M=0.12
+      - RACK_MOVE_CONFIRM_M=0.40
+      - RACK_MOVE_CONFIRM_FRAMES=3
+      - RACK_MOVE_CONFIRM_WINDOW_SEC=1.2
+      - RACK_MOVE_SMOOTH_ALPHA=0.30
 
   mediamtx:
     image: bluenviron/mediamtx:latest

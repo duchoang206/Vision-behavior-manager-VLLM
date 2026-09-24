@@ -24,11 +24,18 @@ RUN pip3 install --break-system-packages --ignore-installed --no-cache-dir -r re
 # Keeping this after requirements preserves the expensive Python dependency
 # layer when only parser/configuration source changes.
 COPY models_config/DeepStream-Yolo /app/DeepStream-Yolo
+COPY models_config/DeepStream-Yolo-Seg /app/DeepStream-Yolo-Seg
 ENV CUDA_VER=12.8
+# The production GPU is RTX 4060 Ti (Ada, sm_89). Pinning this avoids the
+# upstream Makefile requesting future architectures unsupported by CUDA 12.8.
+ARG CUDA_SM=89
 RUN cd /app/DeepStream-Yolo/nvdsinfer_custom_impl_Yolo && \
-    make CUDA_VER=${CUDA_VER} && \
+    make CUDA_VER=${CUDA_VER} SM=${CUDA_SM} && \
     mkdir -p /opt/visionmanager && \
-    cp libnvdsinfer_custom_impl_Yolo.so /opt/visionmanager/
+    cp libnvdsinfer_custom_impl_Yolo.so /opt/visionmanager/ && \
+    cd /app/DeepStream-Yolo-Seg/nvdsinfer_custom_impl_Yolo_seg && \
+    make CUDA_VER=${CUDA_VER} SM=${CUDA_SM} && \
+    cp libnvdsinfer_custom_impl_Yolo_seg.so /opt/visionmanager/
 
 # Copy all source files
 COPY . /app

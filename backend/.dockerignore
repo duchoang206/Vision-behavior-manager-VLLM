@@ -3,6 +3,9 @@ data/
 models/
 .model-tools/
 __pycache__/
+.git
 *.py[cod]
+*.o
+*.so
 *.log
 runs/
