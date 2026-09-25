@@ -15,6 +15,7 @@ import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radi
 const MonitorLabelDialog = dynamic(() => import('./MonitorLabelDialog'), { ssr: false });
 const ActiveLearningDialog = dynamic(() => import('./ActiveLearningDialog'), { ssr: false });
 import MonitorChatAssistant from './MonitorChatAssistant';
+import MonitorAlertsPanel from './MonitorAlertsPanel';
 
 type TrackedObject = {
   id: number;
@@ -653,6 +654,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
   const [labelCameraId, setLabelCameraId] = useState<string | null>(null);
   const [learningCameraId, setLearningCameraId] = useState<string | null>(null);
   const [slotFilter, setSlotFilter] = useState<'ALL' | 'OCCUPIED' | 'EMPTY'>('ALL');
+  const [rightPanelTab, setRightPanelTab] = useState<'ai' | 'alerts'>('ai');
   const { t } = useLanguage();
 
   const lastUiUpdateRef = useRef<number>(0);
@@ -1094,15 +1096,123 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
             </div>
 
 
-            {/* Right: Side Panel (AI Chatbot & Real-Time Environment Hub) */}
-            <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', minWidth: '340px' }}>
-              <MonitorChatAssistant
-                cameras={cameras}
-                liveAlerts={liveAlerts}
-                storageSlots={allStorageSlots}
-                hostName={hostName}
-                onSelectCameraTab={setActiveTab}
-              />
+            {/* Right: Side Panel (AI Chatbot & Real-Time Environment Hub or Alerts) */}
+            <div style={{
+              flex: 1.2,
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: '340px',
+              maxWidth: '430px',
+              gap: '10px',
+              height: '100%',
+              overflow: 'hidden'
+            }}>
+              {/* Header Switcher: 2 Tabs (AI, Cảnh báo) */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                background: C.surface,
+                border: `1px solid ${C.border}`,
+                borderRadius: '12px',
+                padding: '5px 8px',
+                boxShadow: isDark ? '0 4px 12px rgba(0,0,0,0.25)' : '0 2px 8px rgba(0,0,0,0.04)',
+                flexShrink: 0
+              }}>
+                {/* Tabs */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                  {/* Tab 1: AI */}
+                  <button
+                    onClick={() => setRightPanelTab('ai')}
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: rightPanelTab === 'ai' ? 700 : 500,
+                      background: rightPanelTab === 'ai'
+                        ? (isDark ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.12)')
+                        : 'transparent',
+                      color: rightPanelTab === 'ai' ? C.accentGlow : C.textSecondary,
+                      border: rightPanelTab === 'ai' ? `1px solid ${C.accentBorder}` : '1px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <Bot size={15} />
+                    <span>AI</span>
+                  </button>
+
+                  {/* Tab 2: Cảnh báo */}
+                  <button
+                    onClick={() => setRightPanelTab('alerts')}
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      fontSize: '13px',
+                      fontWeight: rightPanelTab === 'alerts' ? 700 : 500,
+                      background: rightPanelTab === 'alerts'
+                        ? (isDark ? 'rgba(244, 63, 94, 0.18)' : 'rgba(244, 63, 94, 0.12)')
+                        : 'transparent',
+                      color: rightPanelTab === 'alerts' ? '#f43f5e' : C.textSecondary,
+                      border: rightPanelTab === 'alerts' ? '1px solid rgba(244, 63, 94, 0.35)' : '1px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <ShieldAlert size={15} />
+                    <span>Cảnh báo</span>
+                    {liveAlerts.length > 0 && (
+                      <span style={{
+                        minWidth: '18px',
+                        height: '18px',
+                        padding: '0 5px',
+                        borderRadius: '9px',
+                        background: '#f43f5e',
+                        color: '#ffffff',
+                        fontSize: '10px',
+                        fontWeight: 800,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 0 8px rgba(244, 63, 94, 0.6)'
+                      }}>
+                        {liveAlerts.length > 99 ? '99+' : liveAlerts.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Tab Content */}
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                {rightPanelTab === 'ai' ? (
+                  <MonitorChatAssistant
+                    cameras={cameras}
+                    liveAlerts={liveAlerts}
+                    storageSlots={allStorageSlots}
+                    hostName={hostName}
+                    onSelectCameraTab={setActiveTab}
+                  />
+                ) : (
+                  <MonitorAlertsPanel
+                    alerts={liveAlerts}
+                    cameras={cameras}
+                    onSelectCameraTab={setActiveTab}
+                    onClearAlerts={() => setLiveAlerts([])}
+                  />
+                )}
+              </div>
             </div>
           </>
         )}
