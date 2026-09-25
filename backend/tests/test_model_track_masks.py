@@ -118,8 +118,9 @@ class MonitorDeploymentAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.store.deploy.assert_called_once_with("model", ["cam"], False, {"cam"}, "admin", {})
         self.assertEqual(self.client.post("/api/models/model/deploy", json={"unexpected": True}).status_code, 422)
+        self.assertEqual(self.client.post("/api/models/model/deploy", json={"camera_ids": ["cam"]}).status_code, 422)
         self.store.deploy.side_effect = WorkflowConflict("conflicting model")
-        self.assertEqual(self.client.post("/api/models/model/deploy", json={}).status_code, 409)
+        self.assertEqual(self.client.post("/api/models/model/deploy", json={"all_cameras": True}).status_code, 409)
 
     def test_stop_and_list_deployment(self):
         self.app.dependency_overrides[require_dashboard_user] = lambda: "admin"

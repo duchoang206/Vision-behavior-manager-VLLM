@@ -22,7 +22,8 @@ class ModelBuild(BaseModel):
 class MonitorDeployment(BaseModel):
     model_config = ConfigDict(extra="forbid")
     camera_ids: list[str] = Field(default_factory=list, max_length=256)
-    all_cameras: bool = True
+    # Never broaden a deployment silently when a client omits this field.
+    all_cameras: bool
     confidence_thresholds: dict = Field(default_factory=dict)
 
 
