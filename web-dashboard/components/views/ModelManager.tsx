@@ -191,6 +191,9 @@ export default function ModelManager({ active }: { active: boolean }) {
 
   const deployableLabels = getRelevantLabels();
   const activeDeployments = (data?.deployments || []).filter(deployment => deployment.enabled);
+  const activeModelIds = new Set(activeDeployments.map(deployment => deployment.model_id));
+  const orderedDeployments = [...(data?.deployments || [])].sort((left, right) => Number(right.enabled) - Number(left.enabled));
+  const orderedModels = [...(data?.models || [])].sort((left, right) => Number(activeModelIds.has(right.id)) - Number(activeModelIds.has(left.id)));
 
   return <section className={styles.root}>
     <div className={styles.header}><div><h2><Cpu size={20} /> Model / TensorRT</h2><p>Upload → TensorRT FP16 → Deploy nhiều model → DeepStream + NvDCF → metadata chuẩn hóa → Monitor.</p></div><button onClick={refresh}><RefreshCw size={15} /> Tải lại</button></div>
@@ -363,7 +366,7 @@ export default function ModelManager({ active }: { active: boolean }) {
         )}
 
         <button disabled={deploying || !selectedModelIds.length || (!allCameras && !cameraIds.length)} onClick={deploySelected}>Deploy {selectedModelIds.length || ''} model đã chọn</button>
-        {(data?.deployments || []).map(deployment => {
+        {orderedDeployments.map(deployment => {
           const defMap = deployment.confidence_thresholds?.default;
           const camMap = deployment.confidence_thresholds?.cameras;
           return (
@@ -386,7 +389,7 @@ export default function ModelManager({ active }: { active: boolean }) {
       </div>
       <div className={styles.runtime}>Custom DeepStream: <strong>{data?.runtime.state || 'idle'}</strong>{data?.runtime.error && <p role="alert">{data.runtime.error}</p>}{Object.entries(data?.runtime.workers || {}).map(([modelId, worker]) => <span key={modelId}>{data?.models.find(model => model.id === modelId)?.name || modelId}: {worker.state || 'idle'} · {worker.model_type || 'detect'}{worker.error && ` · ${worker.error}`}</span>)}</div>
       {!data?.models.length && <p>Chưa upload model. Upload và deploy trước khi bật overlay trên Monitor.</p>}
-      {data?.models.map(model => <article key={model.id}><div className={styles.header}><label><input type="checkbox" disabled={model.state !== 'ready'} checked={selectedModelIds.includes(model.id)} onChange={event => setSelectedModelIds(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id))} /> <strong>{model.name}</strong></label><span data-state={model.state}>{model.state}</span></div><small>{model.filename} · {(model.size_bytes / 1024**2).toFixed(1)} MiB · {model.metadata?.shape?.join(' × ')} · {model.metadata?.model_type || model.metadata?.task || 'detect'}</small><p>{model.labels.map((label, index) => `${index}: ${label}`).join(' · ') || 'Labels sẽ được đọc khi upload xong'}</p>{model.error && <details><summary>Lỗi kiểm tra/build</summary><pre>{model.error}</pre></details>}{model.state === 'failed' && <button onClick={() => retry(model)}>Build lại (dùng labels ở ô bên trái nếu nhập)</button>}{model.state === 'ready' && <button disabled={deploying || (!allCameras && !cameraIds.length)} onClick={() => deploy(model)}>{data?.deployments?.some(deployment => deployment.model_id === model.id) ? 'Cập nhật camera & ngưỡng deploy' : 'Deploy lên Monitor'}</button>}</article>)}
+      {orderedModels.map(model => <article key={model.id}><div className={styles.header}><label><input type="checkbox" disabled={model.state !== 'ready'} checked={selectedModelIds.includes(model.id)} onChange={event => setSelectedModelIds(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id))} /> <strong>{model.name}</strong></label><span data-state={activeModelIds.has(model.id) ? 'live' : model.state}>{activeModelIds.has(model.id) ? 'đang chạy' : model.state}</span></div><small>{model.filename} · {(model.size_bytes / 1024**2).toFixed(1)} MiB · {model.metadata?.shape?.join(' × ')} · {model.metadata?.model_type || model.metadata?.task || 'detect'}</small><p>{model.labels.map((label, index) => `${index}: ${label}`).join(' · ') || 'Labels sẽ được đọc khi upload xong'}</p>{model.error && <details><summary>Lỗi kiểm tra/build</summary><pre>{model.error}</pre></details>}{model.state === 'failed' && <button onClick={() => retry(model)}>Build lại (dùng labels ở ô bên trái nếu nhập)</button>}{model.state === 'ready' && <button disabled={deploying || (!allCameras && !cameraIds.length)} onClick={() => deploy(model)}>{data?.deployments?.some(deployment => deployment.model_id === model.id) ? 'Cập nhật camera & ngưỡng deploy' : 'Deploy lên Monitor'}</button>}</article>)}
     </div></div>{error && <p role="alert" className={styles.error}>{error}</p>}{message && <p role="status" className={styles.message}>{message}</p>}
   </section>;
 }
