@@ -20,9 +20,16 @@
 .models article strong { font-size: 14px; }
 .models [data-state] { color: #c99534; font-size: 11px; }
 .models [data-state='ready'] { color: #24b592; }
+.models [data-state='live'] { color: #20a489; font-weight: 700; }
 .models [data-state='failed'], .root .error { color: #e5676e; }
 .runtime { font-size: 12px; }
 .runtime span { display: block; color: var(--text-muted); margin-top: 8px; }
+.activeModels { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.activeModelRow { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #20a489 42%, var(--border)); border-radius: 9px; background: color-mix(in srgb, #20a489 8%, var(--bg-elevated)); }
+.activeModelRow div { min-width: 0; }
+.activeModelRow b, .activeModelRow small { display: block; overflow-wrap: anywhere; }
+.activeModelRow small { margin-top: 3px; }
+.activeModelRow .liveBadge { flex: 0 0 auto; display: inline-flex; margin: 0; padding: 3px 7px; border-radius: 999px; background: #20a489; color: #fff; font-size: 9px; font-weight: 800; letter-spacing: .06em; }
 .cameraChoice { display: flex; align-items: center; gap: 8px; margin-top: 10px; cursor: pointer; }
 .cameraChoice input { accent-color: #14a08c; }
 .root .message { color: #20a489; }
