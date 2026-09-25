@@ -235,9 +235,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
     if (!video) return;
     return connectRealtimeVideo({
       video,
-      // The browser consumes a lightweight transcoded preview. DeepStream keeps
-      // reading the full-resolution relay for model inference.
-      url: `http://${hostName}:8081/${encodeURIComponent(`${cam.id}_preview`)}/whep`,
+      url: `http://${hostName}:8081/${encodeURIComponent(cam.id)}/whep`,
       isVisible: () => visibleRef.current,
       onPlayingChange: setIsPlaying,
       onReset: () => {
