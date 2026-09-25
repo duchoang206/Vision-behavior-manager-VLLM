@@ -10,7 +10,7 @@ import { LiveRegisteredMask, isLiveRegisteredMask, metadataReceivedAt, updateLiv
 import { segmentationColors, segmentationPath } from '../../lib/segmentation-overlay';
 import { connectRealtimeSocket, createMetadataClock } from '../../lib/realtime-socket';
 import { connectRealtimeVideo } from '../../lib/realtime-video';
-import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radio, Boxes, Package, Grid3X3, Bot, Sparkles, Trash2, X, Check, Search, Sliders } from 'lucide-react';
+import { Activity, ShieldAlert, Users, Layers, AlertCircle, ArrowRightLeft, Radio, Boxes, Package, Grid3X3, Bot, Sparkles, Trash2, X, Check, Search, Sliders, ChevronRight, ChevronLeft, Bell } from 'lucide-react';
 
 const MonitorLabelDialog = dynamic(() => import('./MonitorLabelDialog'), { ssr: false });
 const ActiveLearningDialog = dynamic(() => import('./ActiveLearningDialog'), { ssr: false });
@@ -654,6 +654,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
   const [labelCameraId, setLabelCameraId] = useState<string | null>(null);
   const [learningCameraId, setLearningCameraId] = useState<string | null>(null);
   const [slotFilter, setSlotFilter] = useState<'ALL' | 'OCCUPIED' | 'EMPTY'>('ALL');
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [rightPanelTab, setRightPanelTab] = useState<'ai' | 'alerts'>('ai');
   const { t } = useLanguage();
 
@@ -1046,6 +1047,47 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
           {/* Right Action & Status Badges */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {!isRightPanelOpen && (
+              <button
+                onClick={() => setIsRightPanelOpen(true)}
+                title="Mở lại bảng AI & Cảnh báo"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  background: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+                  border: `1px solid ${C.accentBorder}`,
+                  color: C.accentGlow,
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <ChevronLeft size={14} />
+                <Bot size={14} />
+                <span>Mở AI & Cảnh báo</span>
+                {liveAlerts.length > 0 && (
+                  <span style={{
+                    minWidth: '16px',
+                    height: '16px',
+                    padding: '0 4px',
+                    borderRadius: '8px',
+                    background: '#f43f5e',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    {liveAlerts.length}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1070,10 +1112,12 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
         ) : (
           <>
             {/* Left: Video Grid */}
-            <div style={{ flex: 3, overflowY: 'auto', paddingRight: '6px' }}>
+            <div style={{ flex: isRightPanelOpen ? 3 : 1, overflowY: 'auto', paddingRight: '6px', transition: 'flex 0.3s ease' }}>
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: activeTab === 'all' ? 'repeat(auto-fit, minmax(400px, 1fr))' : '1fr',
+                gridTemplateColumns: activeTab === 'all'
+                  ? (isRightPanelOpen ? 'repeat(auto-fit, minmax(400px, 1fr))' : 'repeat(auto-fit, minmax(480px, 1fr))')
+                  : '1fr',
                 gap: '16px'
               }}>
                 {cameras.map(cam => (
@@ -1095,125 +1139,219 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
               </div>
             </div>
 
-
             {/* Right: Side Panel (AI Chatbot & Real-Time Environment Hub or Alerts) */}
-            <div style={{
-              flex: 1.2,
-              display: 'flex',
-              flexDirection: 'column',
-              minWidth: '340px',
-              maxWidth: '430px',
-              gap: '10px',
-              height: '100%',
-              overflow: 'hidden'
-            }}>
-              {/* Header Switcher: 2 Tabs (AI, Cảnh báo) */}
+            {isRightPanelOpen ? (
               <div style={{
+                flex: 1.2,
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '8px',
-                background: C.surface,
-                border: `1px solid ${C.border}`,
-                borderRadius: '12px',
-                padding: '5px 8px',
-                boxShadow: isDark ? '0 4px 12px rgba(0,0,0,0.25)' : '0 2px 8px rgba(0,0,0,0.04)',
-                flexShrink: 0
+                flexDirection: 'column',
+                minWidth: '340px',
+                maxWidth: '430px',
+                gap: '10px',
+                height: '100%',
+                overflow: 'hidden'
               }}>
-                {/* Tabs */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
-                  {/* Tab 1: AI */}
-                  <button
-                    onClick={() => setRightPanelTab('ai')}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      fontSize: '13px',
-                      fontWeight: rightPanelTab === 'ai' ? 700 : 500,
-                      background: rightPanelTab === 'ai'
-                        ? (isDark ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.12)')
-                        : 'transparent',
-                      color: rightPanelTab === 'ai' ? C.accentGlow : C.textSecondary,
-                      border: rightPanelTab === 'ai' ? `1px solid ${C.accentBorder}` : '1px solid transparent',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <Bot size={15} />
-                    <span>AI</span>
-                  </button>
-
-                  {/* Tab 2: Cảnh báo */}
-                  <button
-                    onClick={() => setRightPanelTab('alerts')}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      fontSize: '13px',
-                      fontWeight: rightPanelTab === 'alerts' ? 700 : 500,
-                      background: rightPanelTab === 'alerts'
-                        ? (isDark ? 'rgba(244, 63, 94, 0.18)' : 'rgba(244, 63, 94, 0.12)')
-                        : 'transparent',
-                      color: rightPanelTab === 'alerts' ? '#f43f5e' : C.textSecondary,
-                      border: rightPanelTab === 'alerts' ? '1px solid rgba(244, 63, 94, 0.35)' : '1px solid transparent',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <ShieldAlert size={15} />
-                    <span>Cảnh báo</span>
-                    {liveAlerts.length > 0 && (
-                      <span style={{
-                        minWidth: '18px',
-                        height: '18px',
-                        padding: '0 5px',
-                        borderRadius: '9px',
-                        background: '#f43f5e',
-                        color: '#ffffff',
-                        fontSize: '10px',
-                        fontWeight: 800,
-                        display: 'inline-flex',
+                {/* Header Switcher: 2 Tabs (AI, Cảnh báo) + Nút gạt ẩn sang phải */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  background: C.surface,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: '12px',
+                  padding: '5px 8px',
+                  boxShadow: isDark ? '0 4px 12px rgba(0,0,0,0.25)' : '0 2px 8px rgba(0,0,0,0.04)',
+                  flexShrink: 0
+                }}>
+                  {/* Tabs */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1 }}>
+                    {/* Tab 1: AI */}
+                    <button
+                      onClick={() => setRightPanelTab('ai')}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        boxShadow: '0 0 8px rgba(244, 63, 94, 0.6)'
-                      }}>
-                        {liveAlerts.length > 99 ? '99+' : liveAlerts.length}
-                      </span>
-                    )}
+                        gap: '6px',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: rightPanelTab === 'ai' ? 700 : 500,
+                        background: rightPanelTab === 'ai'
+                          ? (isDark ? 'rgba(245, 158, 11, 0.18)' : 'rgba(245, 158, 11, 0.12)')
+                          : 'transparent',
+                        color: rightPanelTab === 'ai' ? C.accentGlow : C.textSecondary,
+                        border: rightPanelTab === 'ai' ? `1px solid ${C.accentBorder}` : '1px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <Bot size={15} />
+                      <span>AI</span>
+                    </button>
+
+                    {/* Tab 2: Cảnh báo */}
+                    <button
+                      onClick={() => setRightPanelTab('alerts')}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        fontWeight: rightPanelTab === 'alerts' ? 700 : 500,
+                        background: rightPanelTab === 'alerts'
+                          ? (isDark ? 'rgba(244, 63, 94, 0.18)' : 'rgba(244, 63, 94, 0.12)')
+                          : 'transparent',
+                        color: rightPanelTab === 'alerts' ? '#f43f5e' : C.textSecondary,
+                        border: rightPanelTab === 'alerts' ? '1px solid rgba(244, 63, 94, 0.35)' : '1px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <ShieldAlert size={15} />
+                      <span>Cảnh báo</span>
+                      {liveAlerts.length > 0 && (
+                        <span style={{
+                          minWidth: '18px',
+                          height: '18px',
+                          padding: '0 5px',
+                          borderRadius: '9px',
+                          background: '#f43f5e',
+                          color: '#ffffff',
+                          fontSize: '10px',
+                          fontWeight: 800,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 0 8px rgba(244, 63, 94, 0.6)'
+                        }}>
+                          {liveAlerts.length > 99 ? '99+' : liveAlerts.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Nút gạt sang bên phải để ẩn */}
+                  <button
+                    onClick={() => setIsRightPanelOpen(false)}
+                    title="Gạt sang phải để ẩn bảng AI & Cảnh báo"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      padding: '6px 8px',
+                      borderRadius: '8px',
+                      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+                      border: `1px solid ${C.border}`,
+                      color: C.textSecondary,
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <ChevronRight size={16} />
                   </button>
                 </div>
-              </div>
 
-              {/* Tab Content */}
-              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                {rightPanelTab === 'ai' ? (
-                  <MonitorChatAssistant
-                    cameras={cameras}
-                    liveAlerts={liveAlerts}
-                    storageSlots={allStorageSlots}
-                    hostName={hostName}
-                    onSelectCameraTab={setActiveTab}
-                  />
-                ) : (
-                  <MonitorAlertsPanel
-                    alerts={liveAlerts}
-                    cameras={cameras}
-                    onSelectCameraTab={setActiveTab}
-                    onClearAlerts={() => setLiveAlerts([])}
-                  />
+                {/* Tab Content */}
+                <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                  {rightPanelTab === 'ai' ? (
+                    <MonitorChatAssistant
+                      cameras={cameras}
+                      liveAlerts={liveAlerts}
+                      storageSlots={allStorageSlots}
+                      hostName={hostName}
+                      onSelectCameraTab={setActiveTab}
+                    />
+                  ) : (
+                    <MonitorAlertsPanel
+                      alerts={liveAlerts}
+                      cameras={cameras}
+                      onSelectCameraTab={setActiveTab}
+                      onClearAlerts={() => setLiveAlerts([])}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Slim vertical toggle strip when collapsed */
+              <div
+                onClick={() => setIsRightPanelOpen(true)}
+                title="Bấm để mở lại bảng AI & Cảnh báo"
+                style={{
+                  width: '38px',
+                  borderRadius: '12px',
+                  background: C.surface,
+                  border: `1px solid ${C.border}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'flex-start',
+                  padding: '14px 0',
+                  gap: '16px',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  flexShrink: 0,
+                  boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.05)',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div style={{
+                  width: '26px',
+                  height: '26px',
+                  borderRadius: '7px',
+                  background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: C.accentGlow
+                }}>
+                  <ChevronLeft size={16} />
+                </div>
+
+                <div style={{
+                  writingMode: 'vertical-rl',
+                  transform: 'rotate(180deg)',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: C.textSecondary,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}>
+                  <span>AI & CẢNH BÁO</span>
+                  <Bot size={13} color={C.accentGlow} />
+                </div>
+
+                {liveAlerts.length > 0 && (
+                  <span style={{
+                    minWidth: '20px',
+                    height: '20px',
+                    padding: '0 4px',
+                    borderRadius: '10px',
+                    background: '#f43f5e',
+                    color: '#ffffff',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 0 8px rgba(244, 63, 94, 0.6)'
+                  }}>
+                    {liveAlerts.length > 99 ? '99+' : liveAlerts.length}
+                  </span>
                 )}
               </div>
-            </div>
+            )}
           </>
         )}
       </div>
