@@ -16,6 +16,7 @@ type ModelDeployment = {
   all_cameras: boolean;
   camera_ids: string[];
   enabled: boolean;
+  updated_at?: string;
   confidence_thresholds?: ConfidenceThresholds;
 };
 type ModelPayload = { models: VisionModel[]; chunk_size: number; max_size: number;
@@ -32,7 +33,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export default function ModelManager({ active }: { active: boolean }) {
   const { cameras } = useCameras();
-  const [allCameras, setAllCameras] = useState(true);
+  const [allCameras, setAllCameras] = useState(false);
   const [cameraIds, setCameraIds] = useState<string[]>([]);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
   const [deploying, setDeploying] = useState(false);
@@ -49,6 +50,7 @@ export default function ModelManager({ active }: { active: boolean }) {
   const [message, setMessage] = useState('');
   const [uploadPending, setUploadPending] = useState(false);
   const uploadId = useRef<string | null>(null);
+  const hydratedDeployment = useRef<string | null>(null);
   const mounted = useRef(true);
   const refresh = useCallback(async () => {
     try { const payload = await request<ModelPayload>(''); if (mounted.current) setData(payload); }
@@ -60,16 +62,16 @@ export default function ModelManager({ active }: { active: boolean }) {
   useEffect(() => {
     if (data?.deployments?.length) {
       const activeDep = data.deployments.find(d => d.enabled) || data.deployments[0];
-      if (activeDep?.confidence_thresholds) {
-        if (activeDep.confidence_thresholds.default && Object.keys(defaultThresholds).length === 0) {
-          setDefaultThresholds(activeDep.confidence_thresholds.default);
-        }
-        if (activeDep.confidence_thresholds.cameras && Object.keys(cameraThresholds).length === 0) {
-          setCameraThresholds(activeDep.confidence_thresholds.cameras);
-        }
+      const signature = activeDep ? `${activeDep.id}:${activeDep.updated_at || ''}` : null;
+      if (activeDep && signature !== hydratedDeployment.current) {
+        hydratedDeployment.current = signature;
+        setAllCameras(activeDep.all_cameras === true);
+        setCameraIds(activeDep.all_cameras ? [] : [...activeDep.camera_ids]);
+        setDefaultThresholds(activeDep.confidence_thresholds?.default || {});
+        setCameraThresholds(activeDep.confidence_thresholds?.cameras || {});
       }
     }
-  }, [data?.deployments, defaultThresholds, cameraThresholds]);
+  }, [data?.deployments]);
 
   const labelList = () => labels.split(/[,\n]/).map(label => label.trim()).filter(Boolean);
 
@@ -188,6 +190,7 @@ export default function ModelManager({ active }: { active: boolean }) {
   };
 
   const deployableLabels = getRelevantLabels();
+  const activeDeployments = (data?.deployments || []).filter(deployment => deployment.enabled);
 
   return <section className={styles.root}>
     <div className={styles.header}><div><h2><Cpu size={20} /> Model / TensorRT</h2><p>Upload → TensorRT FP16 → Deploy nhiều model → DeepStream + NvDCF → metadata chuẩn hóa → Monitor.</p></div><button onClick={refresh}><RefreshCw size={15} /> Tải lại</button></div>
@@ -201,6 +204,19 @@ export default function ModelManager({ active }: { active: boolean }) {
       <details><summary>Định dạng hỗ trợ</summary><p>YOLO detect, YOLO-Seg native (task=segment) và YOLO Pose 17 điểm COCO (task=pose, đúng một nhãn người). OBB và classifier được giữ trong contract metadata nhưng cần parser DeepStream tương ứng trước khi build.</p><code>yolo export model=best.pt format=onnx imgsz=640 batch=1 dynamic=False half=False nms=False</code><p>Build dùng GPU một lần nên có thể tăng tải tạm thời.</p></details>
     </div><div className={styles.models}>
       <div className={styles.runtime}>
+        <div className={styles.activeModels}>
+          <strong>Model TensorRT đang chạy</strong>
+          {activeDeployments.length ? activeDeployments.map(deployment => {
+            const model = data?.models.find(item => item.id === deployment.model_id);
+            const cameraNames = deployment.all_cameras
+              ? 'Tất cả camera'
+              : deployment.camera_ids.map(id => cameras.find(camera => camera.id === id)?.name || id).join(', ');
+            return <div className={styles.activeModelRow} key={deployment.id}>
+              <span className={styles.liveBadge}>ĐANG CHẠY</span>
+              <div><b>{model?.filename || model?.name || deployment.model_id}</b><small>{model?.metadata?.shape?.join(' × ') || 'TensorRT'} · {cameraNames}</small></div>
+            </div>;
+          }) : <p>Chưa có model trực tiếp nào đang bật.</p>}
+        </div>
         <strong>Camera chạy model</strong>
         <label className={styles.cameraChoice}><input type="checkbox" checked={allCameras} onChange={event => setAllCameras(event.target.checked)} /> Tất cả camera, tự áp dụng cho camera mới</label>
         {!allCameras && cameras.map(camera => <label className={styles.cameraChoice} key={camera.id}><input type="checkbox" checked={cameraIds.includes(camera.id)} onChange={event => setCameraIds(previous => event.target.checked ? [...previous, camera.id] : previous.filter(id => id !== camera.id))} />{camera.name}</label>)}
@@ -370,7 +386,7 @@ export default function ModelManager({ active }: { active: boolean }) {
       </div>
       <div className={styles.runtime}>Custom DeepStream: <strong>{data?.runtime.state || 'idle'}</strong>{data?.runtime.error && <p role="alert">{data.runtime.error}</p>}{Object.entries(data?.runtime.workers || {}).map(([modelId, worker]) => <span key={modelId}>{data?.models.find(model => model.id === modelId)?.name || modelId}: {worker.state || 'idle'} · {worker.model_type || 'detect'}{worker.error && ` · ${worker.error}`}</span>)}</div>
       {!data?.models.length && <p>Chưa upload model. Upload và deploy trước khi bật overlay trên Monitor.</p>}
-      {data?.models.map(model => <article key={model.id}><div className={styles.header}><label><input type="checkbox" disabled={model.state !== 'ready'} checked={selectedModelIds.includes(model.id)} onChange={event => setSelectedModelIds(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id))} /> <strong>{model.name}</strong></label><span data-state={model.state}>{model.state}</span></div><small>{model.filename} · {(model.size_bytes / 1024**2).toFixed(1)} MiB · {model.metadata?.shape?.join(' × ')} · {model.metadata?.model_type || model.metadata?.task || 'detect'}</small><p>{model.labels.map((label, index) => `${index}: ${label}`).join(' · ') || 'Labels sẽ được đọc khi upload xong'}</p>{model.error && <details><summary>Lỗi kiểm tra/build</summary><pre>{model.error}</pre></details>}{model.state === 'failed' && <button onClick={() => retry(model)}>Build lại (dùng labels ở ô bên trái nếu nhập)</button>}{model.state === 'ready' && <button disabled={deploying || (!allCameras && !cameraIds.length)} onClick={() => deploy(model)}>{data.deployments?.some(deployment => deployment.model_id === model.id) ? 'Cập nhật camera & ngưỡng deploy' : 'Deploy lên Monitor'}</button>}</article>)}
+      {data?.models.map(model => <article key={model.id}><div className={styles.header}><label><input type="checkbox" disabled={model.state !== 'ready'} checked={selectedModelIds.includes(model.id)} onChange={event => setSelectedModelIds(previous => event.target.checked ? [...previous, model.id] : previous.filter(id => id !== model.id))} /> <strong>{model.name}</strong></label><span data-state={model.state}>{model.state}</span></div><small>{model.filename} · {(model.size_bytes / 1024**2).toFixed(1)} MiB · {model.metadata?.shape?.join(' × ')} · {model.metadata?.model_type || model.metadata?.task || 'detect'}</small><p>{model.labels.map((label, index) => `${index}: ${label}`).join(' · ') || 'Labels sẽ được đọc khi upload xong'}</p>{model.error && <details><summary>Lỗi kiểm tra/build</summary><pre>{model.error}</pre></details>}{model.state === 'failed' && <button onClick={() => retry(model)}>Build lại (dùng labels ở ô bên trái nếu nhập)</button>}{model.state === 'ready' && <button disabled={deploying || (!allCameras && !cameraIds.length)} onClick={() => deploy(model)}>{data?.deployments?.some(deployment => deployment.model_id === model.id) ? 'Cập nhật camera & ngưỡng deploy' : 'Deploy lên Monitor'}</button>}</article>)}
     </div></div>{error && <p role="alert" className={styles.error}>{error}</p>}{message && <p role="status" className={styles.message}>{message}</p>}
   </section>;
 }
