@@ -10,6 +10,7 @@ import {
   Video, Download, Play, X, ShieldAlert, Clock, Trash2
 } from 'lucide-react';
 import RecordingJournal from './RecordingJournal';
+import styles from './AnalyticsView.module.css';
 
 type ThemeColors = {
   accent: string;
@@ -281,21 +282,21 @@ export default function AnalyticsView() {
 
   // Shared styles
   const sectionCard: React.CSSProperties = {
-    background: C.card, borderRadius: '12px',
+    background: C.card, borderRadius: '16px',
     border: `1px solid ${C.border}`, padding: '20px',
-    boxShadow: isDark ? '0 4px 20px rgba(0,0,0,0.4)' : '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)',
+    boxShadow: isDark ? '0 16px 38px rgba(0,0,0,0.28)' : '0 12px 30px rgba(91,71,43,0.08)',
   };
 
   return (
-    <div style={{ backgroundColor: C.bg, minHeight: 'calc(100vh - 80px)', padding: '24px', transition: 'background-color 0.2s ease' }}>
-      <div style={{ maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '22px' }}>
+    <div className={styles.page}>
+      <div className={styles.container}>
 
         {/* ── Page Header ─────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
+        <div className={styles.pageHeader}>
+          <div className={styles.headerCopy}>
             <h1 style={{ fontSize: '22px', fontWeight: 700, color: C.textPrimary, margin: 0, letterSpacing: '-0.02em' }}>
               AI Video Analytics
-              <span style={{ color: C.textMuted, fontWeight: 400, fontSize: '16px' }}> & Storage Dashboard</span>
+              <span className={styles.titleSuffix} style={{ color: C.textMuted, fontWeight: 400, fontSize: '16px' }}> & Storage Dashboard</span>
             </h1>
             <p style={{ fontSize: '12px', color: C.textSub, margin: '5px 0 0', fontFamily: 'monospace' }}>
               Dữ liệu sự kiện lưu trữ & truy vấn thời gian thực · Lưu trữ video chứng cứ MP4 ·{' '}
@@ -304,9 +305,10 @@ export default function AnalyticsView() {
           </div>
 
           {/* Journey Search */}
-          <form onSubmit={handleSearchJourney} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div style={{ position: 'relative' }}>
+          <form className={styles.searchForm} onSubmit={handleSearchJourney}>
+            <div className={styles.searchControl}>
               <input
+                className={styles.searchInput}
                 type="number" value={searchGid}
                 onChange={e => setSearchGid(e.target.value)}
                 placeholder="Tra cứu Global ID..."
@@ -323,7 +325,7 @@ export default function AnalyticsView() {
               />
               <UserCheck size={14} color={C.textMuted} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
             </div>
-            <button type="submit" style={{
+            <button className={styles.searchButton} type="submit" style={{
               padding: '9px 18px',
               background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
               color: '#fff', border: '1px solid rgba(99,102,241,0.5)',
@@ -339,13 +341,13 @@ export default function AnalyticsView() {
 
         {/* ── Journey Result ───────────────────────────────────────────────── */}
         {journeyData && (
-          <div style={{
+          <div className={styles.journeyCard} style={{
             ...sectionCard,
             borderLeft: `3px solid ${C.accent}`,
             borderColor: C.accentBorder,
             background: C.cardAlt,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div className={styles.journeyHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, color: C.accentL, fontSize: '14px' }}>
                 <History size={16} /> Hành trình Global ID #{journeyData.global_id}
               </div>
@@ -353,9 +355,9 @@ export default function AnalyticsView() {
                 background: 'none', border: 'none', color: C.textMuted, cursor: 'pointer', fontSize: '18px',
               }}>✕</button>
             </div>
-            <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '4px' }}>
+            <div className={styles.journeyTrack}>
               {(journeyData.trajectory || []).map((step, idx) => (
-                <div key={idx} style={{
+                <div className={styles.journeyStep} key={idx} style={{
                   background: C.card, padding: '12px', borderRadius: '8px',
                   border: `1px solid ${C.borderHard}`, minWidth: '164px', fontSize: '12px',
                   transition: 'border-color 0.2s',
@@ -377,9 +379,9 @@ export default function AnalyticsView() {
         )}
 
         {/* ── KPI Cards ────────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px' }}>
+        <div className={styles.kpiGrid}>
           {getKpis(data, C).map((k, i) => (
-            <div key={i} style={{
+            <div className={styles.kpiCard} key={i} style={{
               background: isDark ? 'rgba(13,17,23,0.8)' : 'rgba(255,255,255,0.95)',
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
@@ -422,14 +424,14 @@ export default function AnalyticsView() {
         </div>
 
         {/* ── Main 2-col grid ──────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.05fr 1.35fr', gap: '16px' }}>
+        <div className={styles.mainGrid}>
 
           {/* Left column */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className={styles.leftColumn}>
 
             {/* Bar Chart: Phân bố sự kiện hành vi */}
-            <div style={sectionCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div className={styles.sectionCard} style={sectionCard}>
+              <div className={styles.sectionHeader}>
                 <h3 style={{ fontSize: '13px', fontWeight: 700, color: C.textLabel, margin: 0, letterSpacing: '0.02em' }}>
                   PHÂN BỐ SỰ KIỆN HÀNH VI
                 </h3>
@@ -443,11 +445,11 @@ export default function AnalyticsView() {
               </div>
 
               {/* Stat breakdown badges */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '16px' }}>
+              <div className={styles.statGrid}>
                 {data.class_distribution.map((item, idx) => {
                   const color = C.chart[idx % C.chart.length];
                   return (
-                    <div key={idx} style={{
+                    <div className={styles.statItem} key={idx} style={{
                       background: C.cardAlt, padding: '8px 12px', borderRadius: '8px',
                       border: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                     }}>
@@ -463,7 +465,7 @@ export default function AnalyticsView() {
                 })}
               </div>
 
-              <div style={{ height: '180px', minWidth: 0, minHeight: 180 }}>
+              <div className={styles.chart}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={180}>
                   <BarChart data={data.class_distribution} barCategoryGap="30%">
                     <CartesianGrid strokeDasharray="2 4" vertical={false} stroke={isDark ? 'rgba(51,65,85,0.4)' : 'rgba(229,231,235,0.8)'} />
@@ -481,14 +483,14 @@ export default function AnalyticsView() {
             </div>
 
             {/* Tripwire Counters */}
-            <div style={sectionCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div className={styles.sectionCard} style={sectionCard}>
+              <div className={styles.sectionHeader}>
                 <h3 style={{ fontSize: '13px', fontWeight: 700, color: C.textLabel, margin: 0, letterSpacing: '0.02em' }}>
                   THỐNG KÊ TRIPWIRE (VẠCH ẢO)
                 </h3>
                 <ArrowRightLeft size={16} color={C.cyanL} />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className={styles.tripwireList}>
                 {(data.tripwire_stats || []).length === 0 ? (
                   <div style={{
                     border: `1px dashed ${C.borderHard}`,
@@ -505,7 +507,7 @@ export default function AnalyticsView() {
                   </div>
                 ) : (
                   (data.tripwire_stats || []).map((t, i) => (
-                    <div key={`${t.rule_id}-${t.cam_id}-${i}`} style={{
+                    <div className={styles.tripwireItem} key={`${t.rule_id}-${t.cam_id}-${i}`} style={{
                       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       padding: '11px 14px', background: C.cardAlt,
                       borderRadius: '8px', border: `1px solid ${C.border}`,
@@ -519,7 +521,7 @@ export default function AnalyticsView() {
                           Nguồn: Camera {t.cam_id}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '12px' }}>
+                      <div className={styles.tripwireCounts}>
                         <span style={{
                           background: 'rgba(74,222,128,0.12)', color: isDark ? '#4ade80' : '#15803d',
                           border: '1px solid rgba(74,222,128,0.25)', padding: '3px 9px', borderRadius: '6px',
@@ -544,15 +546,15 @@ export default function AnalyticsView() {
           </div>
 
           {/* Right column — Event Logs (Nhật ký sự kiện & lưu file MP4) */}
-          <div style={{ ...sectionCard, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <div className={`${styles.sectionCard} ${styles.eventsPanel}`} style={{ ...sectionCard, display: 'flex', flexDirection: 'column' }}>
+            <div className={styles.eventsHeader}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldAlert size={18} color={C.rose} />
                 <h3 style={{ fontSize: '14px', fontWeight: 700, color: C.textPrimary, margin: 0, letterSpacing: '0.02em' }}>
                   NHẬT KÝ SỰ KIỆN & CHỨNG CỨ MP4
                 </h3>
               </div>
-              <span style={{
+              <span className={styles.eventsBadge} style={{
                 fontSize: '11px', color: C.accentL, fontFamily: 'monospace', fontWeight: 600,
                 background: C.accentDim, padding: '3px 8px', borderRadius: '6px', border: `1px solid ${C.accentBorder}`
               }}>
@@ -561,9 +563,9 @@ export default function AnalyticsView() {
             </div>
 
             <RecordingJournal />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><strong style={{ color: C.textPrimary, fontSize: 12 }}>SỰ KIỆN HÀNH VI</strong><button disabled={deleteBusy} onClick={() => void deleteHistory()} style={{ background: C.roseDim, color: C.rose, border: `1px solid ${C.roseBorder}`, borderRadius: 6, padding: '7px 10px', cursor: 'pointer', fontSize: 11 }}>Xóa lịch sử cũ</button></div>
+            <div className={styles.eventToolbar}><strong style={{ color: C.textPrimary, fontSize: 12 }}>SỰ KIỆN HÀNH VI</strong><button disabled={deleteBusy} onClick={() => void deleteHistory()} style={{ background: C.roseDim, color: C.rose, border: `1px solid ${C.roseBorder}`, borderRadius: 6, padding: '7px 10px', cursor: 'pointer', fontSize: 11 }}>Xóa lịch sử cũ</button></div>
             {deleteError && <p role="alert" style={{ color: C.rose, fontSize: 12 }}>{deleteError}</p>}
-            <div style={{ flex: 1, overflowY: 'auto', maxHeight: '520px', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+            <div className={styles.eventList}>
               {(data.recent_events || []).length === 0 ? (
                 <div style={{
                   border: `1px dashed ${C.borderHard}`, borderRadius: '10px',
@@ -590,7 +592,7 @@ export default function AnalyticsView() {
                   const videoFileName = ev.video_file;
 
                   return (
-                    <div key={i} style={{
+                    <div className={styles.eventCard} key={i} style={{
                       padding: '13px 15px', borderRadius: '10px',
                       background: C.cardAlt, border: `1px solid ${C.border}`,
                       borderLeft: `4px solid ${accentColor}`,
@@ -599,8 +601,8 @@ export default function AnalyticsView() {
                       transition: 'border-color 0.2s, transform 0.15s',
                     }}>
                       {/* Top row: Type badge, Status badge, Timestamp */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div className={styles.eventTop}>
+                        <div className={styles.eventBadges}>
                           <span style={{
                             fontWeight: 700, color: accentColor, fontSize: '11px',
                             textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.06em',
@@ -625,7 +627,7 @@ export default function AnalyticsView() {
                         </div>
 
                         {/* Timestamp */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: C.textMuted, fontSize: '11px', fontFamily: 'monospace' }}>
+                        <div className={styles.eventTime} style={{ color: C.textMuted }}>
                           <Clock size={12} />
                           <span>{ev.time}</span>
                           {ev.id && <button aria-label={`Xóa sự kiện ${ev.id}`} disabled={deleteBusy} onClick={() => void deleteHistory(ev.id)} style={{ border: 'none', background: 'transparent', color: C.rose, cursor: 'pointer', padding: 5 }}><Trash2 size={13} /></button>}
@@ -638,19 +640,19 @@ export default function AnalyticsView() {
                       </div>
 
                       {/* Source Camera & GID */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: C.textSub, fontFamily: 'monospace' }}>
+                      <div className={styles.eventMeta} style={{ color: C.textSub }}>
                         <span>Nguồn: <b>{ev.camera}</b> {ev.global_id ? `· Global ID #${ev.global_id}` : ''}</span>
                         <span style={{ color: C.accentL, fontWeight: 600 }}>Mức độ: {(ev.severity || 'unknown').toUpperCase()}</span>
                       </div>
 
                       {/* MP4 Attachment bar */}
-                      <div style={{
+                      <div className={styles.attachment} style={{
                         marginTop: '4px', padding: '8px 10px', borderRadius: '7px',
                         background: isDark ? 'rgba(9,10,15,0.8)' : 'rgba(241,245,249,0.9)',
                         border: `1px solid ${C.borderHard}`,
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div className={styles.attachmentInfo}>
                           <Video size={14} color={C.cyanL} />
                           <span style={{
                             fontSize: '11px', color: C.textLabel, fontFamily: 'JetBrains Mono, monospace',
@@ -662,7 +664,7 @@ export default function AnalyticsView() {
 
                         {/* Actions: Play Video / Download */}
                         {videoFileName && ev.recording_id && (
-                          <div style={{ display: 'flex', gap: '6px' }}>
+                          <div className={styles.attachmentActions}>
                             <button
                               onClick={() => setSelectedVideoEvent({ ...ev, video_file: videoFileName })}
                               style={{
