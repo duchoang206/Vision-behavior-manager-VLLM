@@ -288,8 +288,19 @@ class ModelRegistry(WorkflowStore):
                         raise ValueError("SSD thiếu chỗ để build engine.")
                     self._state(model_id, "building", metadata)
                     temporary = directory / "building.engine"
-                    self._execute([self.trtexec, f"--onnx={directory / 'model.onnx'}", f"--saveEngine={temporary}",
-                                   "--fp16", "--skipInference", "--memPoolSize=workspace:1024", "--builderOptimizationLevel=2", "--maxAuxStreams=0"], log, 1800)
+                    build_cmd = [self.trtexec, f"--onnx={directory / 'model.onnx'}", f"--saveEngine={temporary}",
+                                   "--fp16", "--skipInference", "--memPoolSize=workspace:1024", "--builderOptimizationLevel=2", "--maxAuxStreams=0"]
+                    if metadata.get("dynamic_batch"):
+                        input_name = metadata.get("input", "images")
+                        h = metadata.get("shape", [1, 3, 640, 640])[2]
+                        w = metadata.get("shape", [1, 3, 640, 640])[3]
+                        max_b = metadata.get("max_batch", 8)
+                        build_cmd.extend([
+                            f"--minShapes={input_name}:1x3x{h}x{w}",
+                            f"--optShapes={input_name}:{min(6, max_b)}x3x{h}x{w}",
+                            f"--maxShapes={input_name}:{max_b}x3x{h}x{w}",
+                        ])
+                    self._execute(build_cmd, log, 1800)
                     if not temporary.is_file() or temporary.stat().st_size < 1024:
                         raise ValueError("Không tạo được TensorRT engine hợp lệ.")
                     temporary.replace(directory / "detector.engine")

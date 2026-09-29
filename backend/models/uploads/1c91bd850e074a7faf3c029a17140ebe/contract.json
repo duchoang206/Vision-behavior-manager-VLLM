@@ -1,0 +1,1 @@
+{"labels": ["person"], "input": "images", "output": "output0", "outputs": ["output0"], "shape": [1, 3, 640, 640], "output_shape": [1, 56, 8400], "sha256": "0834f0b95e72978daa3bd8782ea4598a30bb08f79ff0dd8741347f852c998dc2", "task": "pose", "model_type": "pose", "contract": "yolo_raw_pose_v8_v11", "precision": "fp16", "labels_source": "manual"}

@@ -1,0 +1,31 @@
+{
+  "labels": [
+    "Rack",
+    "Robot_1",
+    "Robot_2001",
+    "Robot_28100",
+    "Robot_6868"
+  ],
+  "input": "images",
+  "output": "output0",
+  "outputs": [
+    "output0"
+  ],
+  "shape": [
+    1,
+    3,
+    960,
+    960
+  ],
+  "output_shape": [
+    1,
+    9,
+    18900
+  ],
+  "sha256": "11b767231075f925574120d8d61f5fb68d3cd42318164c817e848c73ead4ac2b",
+  "task": "detect",
+  "model_type": "detect",
+  "contract": "yolo_raw_detect_v8_v11",
+  "precision": "fp16",
+  "labels_source": "manual"
+}
