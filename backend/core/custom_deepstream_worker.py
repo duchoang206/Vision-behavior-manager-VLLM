@@ -169,7 +169,17 @@ def run(settings):
         pipeline.add(value)
         return value
 
-    muxer = element("nvstreammux", "mux", {"batch-size": 1, "width": 1280, "height": 720,
+    config_path = Path(settings.get("config", ""))
+    configured_batch = 1
+    if config_path.is_file():
+        for line in config_path.read_text().splitlines():
+            if line.strip().startswith("batch-size="):
+                try:
+                    configured_batch = int(line.strip().split("=")[1])
+                except (ValueError, IndexError):
+                    pass
+    batch_size = max(1, min(configured_batch, len(cameras)))
+    muxer = element("nvstreammux", "mux", {"batch-size": batch_size, "width": 1280, "height": 720,
                     "live-source": True, "batched-push-timeout": 10000, "sync-inputs": False,
                     "nvbuf-memory-type": 2})
     detector = element("nvinfer", "detector", {"config-file-path": settings["config"]})
