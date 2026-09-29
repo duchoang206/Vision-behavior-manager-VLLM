@@ -86,6 +86,7 @@ class IdentityRuntimeTests(unittest.TestCase):
         process = mock.Mock()
         process.poll.return_value = None
         with mock.patch.dict(os.environ, {"DISPLAY_PREVIEW_ENABLED": "1"}, clear=False), \
+                mock.patch.object(client, "_watch_preview"), \
                 mock.patch("core.mediamtx_client.subprocess.Popen", return_value=process) as popen:
             self.assertTrue(client.ensure_preview("cam1"))
             self.assertTrue(client.ensure_preview("cam1"))
@@ -102,6 +103,16 @@ class IdentityRuntimeTests(unittest.TestCase):
             client.ensure_path("cam1", "rtsp://camera")
             post.assert_not_called()
             patch.assert_not_called()
+
+    def test_on_demand_path_is_explicitly_configured(self):
+        client = MediaMTXClient("http://mediamtx/v3/config/paths")
+        with mock.patch("core.mediamtx_client.requests.get") as get, \
+                mock.patch("core.mediamtx_client.requests.post") as post:
+            get.return_value.status_code = 404
+            response = post.return_value
+            response.status_code = 200
+            client.ensure_path("cam1", "rtsp://camera", source_on_demand=True)
+            self.assertTrue(post.call_args.kwargs["json"]["sourceOnDemand"])
 
     def test_changed_source_uses_patch_and_missing_path_uses_post(self):
         client = MediaMTXClient("http://mediamtx/v3/config/paths")

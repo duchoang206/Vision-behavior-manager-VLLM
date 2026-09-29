@@ -12,7 +12,7 @@
 ####################################################################################################
 
 BaseConfig:
-  minDetectorConfidence: 0.0050    # If the confidence of a detector bbox is lower than this, then it won't be considered for tracking
+  minDetectorConfidence: 0.2000    # If the confidence of a detector bbox is lower than this, then it won't be considered for tracking
 
 TargetManagement:
   enableBboxUnClipping: 1    # In case the bbox is likely to be clipped by image border, unclip bbox
@@ -21,7 +21,7 @@ TargetManagement:
 
   # [Creation & Termination Policy]
   minIouDiff4NewTarget: 0.7418    # If the IOU between the newly detected object and any of the existing targets is higher than this threshold, this newly detected object will be discarded.
-  minTrackerConfidence: 0.4009    # If the confidence of an object tracker is lower than this on the fly, then it will be tracked in shadow mode. Valid Range: [0.0, 1.0]
+  minTrackerConfidence: 0.2000    # If the confidence of an object tracker is lower than this on the fly, then it will be tracked in shadow mode. Valid Range: [0.0, 1.0]
   probationAge: 2    # If the target's age exceeds this, the target will be considered to be valid.
   maxShadowTrackingAge: 51    # Max length of shadow tracking. If the shadowTrackingAge exceeds this limit, the tracker will be terminated.
   earlyTerminationAge: 1    # If the shadowTrackingAge reaches this threshold while in TENTATIVE period, the target will be terminated prematurely.
@@ -36,7 +36,7 @@ TrajectoryManagement:
   minMatchingScore4ReidSimilarity: 0.45
   matchingScoreWeight4TrackletSimilarity: 0.65
   matchingScoreWeight4ReidSimilarity: 0.35
-  reidExtractionInterval: 1
+  reidExtractionInterval: 5
 
 DataAssociator:
   dataAssociatorType: 0    # the type of data associator among { DEFAULT= 0 }
@@ -55,7 +55,7 @@ DataAssociator:
   matchingScoreWeight4Iou: 0.3656    # Weight for the IOU score
 
   # [Association Metric: Tentative detections] only uses iou similarity for tentative detections
-  tentativeDetectorConfidence: 0.2008    # If a detection's confidence is lower than this but higher than minDetectorConfidence, then it's considered as a tentative detection
+  tentativeDetectorConfidence: 0.2000    # If a detection's confidence is lower than this but higher than minDetectorConfidence, then it's considered as a tentative detection
   minMatchingScore4TentativeIou: 0.5296    # Min iou threshold to match targets and tentative detection
 
 StateEstimator:
@@ -63,10 +63,10 @@ StateEstimator:
 
   # [Dynamics Modeling]
   processNoiseVar4Loc: 1.5110    # Process noise variance for bbox center
-  processNoiseVar4Size: 1.3159    # Process noise variance for bbox size
-  processNoiseVar4Vel: 0.0300    # Process noise variance for velocity
-  measurementNoiseVar4Detector: 3.0283    # Measurement noise variance for detector's detection
-  measurementNoiseVar4Tracker: 8.1505    # Measurement noise variance for tracker's localization
+  processNoiseVar4Size: 0.0800    # Process noise variance for bbox size (stabilized to prevent expanding/contracting)
+  processNoiseVar4Vel: 0.0500    # Process noise variance for velocity
+  measurementNoiseVar4Detector: 18.0000    # Measurement noise variance for detector's detection (tuned to eliminate bounding box edge jitter)
+  measurementNoiseVar4Tracker: 16.0000    # Measurement noise variance for tracker's localization
 
 VisualTracker:
   visualTrackerType: 1    # the type of visual tracker among { DUMMY=0, NvDCF=1 }
