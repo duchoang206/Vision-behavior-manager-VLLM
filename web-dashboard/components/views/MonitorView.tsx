@@ -347,17 +347,33 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               const rawClass = (track.class || 'Object').toLowerCase();
               const isRobot = rawClass.includes('robot');
 
-              if (isRobot) {
-                track.curX += (track.targetX - track.curX) * 0.70;
-                track.curY += (track.targetY - track.curY) * 0.70;
-                track.curW += (track.targetW - track.curW) * 0.35;
-                track.curH += (track.targetH - track.curH) * 0.35;
+              const dist = Math.hypot(track.targetX - track.curX, track.targetY - track.curY);
+              const isRackObj = /rack|pallet|shelf|kệ/i.test(track.label || track.class || '');
+              let alphaPos = 0.65;
+              if (isRackObj && !track.carried_rack) {
+                // Stationary rack: anchor solidly when micro-jittering
+                alphaPos = dist > 0.03 ? 0.90 : (dist < 0.005 ? 0.20 : 0.45);
+              } else if (dist > 0.03) {
+                // Fast movement (> 30-40px): lock on almost instantly to ensure strict realtime tracking
+                alphaPos = 0.92;
+              } else if (dist > 0.008) {
+                // Moderate motion: responsive tracking
+                alphaPos = 0.75;
+              } else if (dist < 0.0008) {
+                // Sub-pixel difference (< 1px): lock exactly to prevent floating/drifting
+                alphaPos = 1.0;
               } else {
-                track.curX = track.targetX;
-                track.curY = track.targetY;
-                track.curW = track.targetW;
-                track.curH = track.targetH;
+                // Subtle micro-movement / settling: gentle smoothing
+                alphaPos = 0.45;
               }
+
+              const sizeDist = Math.hypot(track.targetW - track.curW, track.targetH - track.curH);
+              const alphaSize = sizeDist < 0.001 ? 1.0 : (sizeDist > 0.06 ? 0.20 : 0.12);
+
+              track.curX += (track.targetX - track.curX) * alphaPos;
+              track.curY += (track.targetY - track.curY) * alphaPos;
+              track.curW += (track.targetW - track.curW) * alphaSize;
+              track.curH += (track.targetH - track.curH) * alphaSize;
 
               const px = mapVideoX(track.curX);
               const py = mapVideoY(track.curY);
@@ -935,8 +951,35 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     track.labelPrompt = Boolean(obj.label_prompt_id);
                     track.maskFrame = maskFrame;
                     track.observedAt = obj.observed_at;
-                    track.targetX = obj.x; track.targetY = obj.y;
-                    track.targetW = obj.w; track.targetH = obj.h;
+                    const rawDx = Math.abs(obj.x - track.targetX);
+                    const rawDy = Math.abs(obj.y - track.targetY);
+                    const rawDw = Math.abs(obj.w - track.targetW);
+                    const rawDh = Math.abs(obj.h - track.targetH);
+                    // Dead-zone: suppress raw detector sub-pixel jitter (< ~2.5px) when stationary
+                    if (rawDx > 0.0020 || rawDy > 0.0020) {
+                      track.targetX = obj.x; track.targetY = obj.y;
+                    }
+                    if (rawDw > 0.0030 || rawDh > 0.0030) {
+                      const isRackTrack = /rack|pallet|shelf|kệ/i.test(obj.label || obj.class || '');
+                      if (isRackTrack && !obj.carried_rack) {
+                        // Stored racks on floor: full height includes legs touching ground.
+                        // Filter out transient detector flicker that clips legs (Mode B)
+                        if (obj.h < track.targetH * 0.88 && rawDx < 0.015) {
+                          // Retain confirmed height touching ground
+                        } else {
+                          const maxStepW = Math.max(0.012, track.targetW * 0.15);
+                          const maxStepH = Math.max(0.012, track.targetH * 0.15);
+                          track.targetW = Math.max(track.targetW - maxStepW, Math.min(track.targetW + maxStepW, obj.w));
+                          track.targetH = Math.max(track.targetH - maxStepH, Math.min(track.targetH + maxStepH, obj.h));
+                        }
+                      } else {
+                        // Slew-rate limiter on dimensions: physical objects don't jump > 15% in a single packet!
+                        const maxStepW = Math.max(0.012, track.targetW * 0.15);
+                        const maxStepH = Math.max(0.012, track.targetH * 0.15);
+                        track.targetW = Math.max(track.targetW - maxStepW, Math.min(track.targetW + maxStepW, obj.w));
+                        track.targetH = Math.max(track.targetH - maxStepH, Math.min(track.targetH + maxStepH, obj.h));
+                      }
+                    }
                     track.floorX = fx; track.floorY = fy;
                     track.lastUpdated = receivedAt;
                     if (obj.fms_status !== undefined) track.fms_status = obj.fms_status;
