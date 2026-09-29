@@ -106,7 +106,11 @@ class FMSBridge:
         self._mqtt_client = None
         self._broadcast_task: Optional[asyncio.Task] = None
         self._datasocket_task: Optional[asyncio.Task] = None
+        self._db_sync_task: Optional[asyncio.Task] = None
+        self._offset_task: Optional[asyncio.Task] = None
         self._is_running: bool = False
+        self.db_refresh_seconds = max(10.0, float(os.getenv("FMS_DB_REFRESH_SECONDS", "30")))
+        self.retry_max_seconds = max(30.0, float(os.getenv("FMS_RETRY_MAX_SECONDS", "300")))
 
     def _pose_distance(self, a, b) -> float:
         try:
@@ -232,7 +236,8 @@ class FMSBridge:
     def load_offset_maps_from_db(self):
         """Load nav_map offsets from PostgreSQL"""
         if not PG_AVAILABLE:
-            return
+            return False
+        conn = None
         try:
             conn = psycopg2.connect(
                 host=self.fms_ip,
@@ -240,7 +245,8 @@ class FMSBridge:
                 dbname=self.db_name,
                 user=self.db_user,
                 password=self.db_pass,
-                connect_timeout=3
+                connect_timeout=3,
+                options="-c statement_timeout=3000"
             )
             cur = conn.cursor()
             cur.execute("SELECT map_name, offset_map_list FROM nav_map WHERE map_name='TT';")
@@ -255,14 +261,19 @@ class FMSBridge:
                             "theta": float(m.get("thetaOffset", 0.0))
                         }
                 logger.info(f"Loaded {len(self.offset_map_dict)} map offsets from DB: {list(self.offset_map_dict.keys())}")
-            conn.close()
+            return True
         except Exception as e:
             logger.warning(f"Could not load offsets from FMS DB ({self.fms_ip}:{self.db_port}): {e}. Using defaults.")
+            return False
+        finally:
+            if conn is not None:
+                conn.close()
 
     def load_robots_from_db(self):
         """Pre-populate real robot inventory & last known states from FMS PostgreSQL database"""
         if not PG_AVAILABLE:
-            return
+            return False
+        conn = None
         try:
             conn = psycopg2.connect(
                 host=self.fms_ip,
@@ -270,7 +281,8 @@ class FMSBridge:
                 dbname=self.db_name,
                 user=self.db_user,
                 password=self.db_pass,
-                connect_timeout=3
+                connect_timeout=3,
+                options="-c statement_timeout=3000"
             )
             cur = conn.cursor()
             cur.execute("""
@@ -366,10 +378,14 @@ class FMSBridge:
                     "last_position_at": position_at,
                     "last_position_source": position_source,
                 }
-            conn.close()
             logger.info(f"Loaded {len(self.robot_states)} real robots from FMS DB: {list(self.robot_states.keys())}")
+            return True
         except Exception as e:
             logger.warning(f"Could not load robots from FMS DB ({self.fms_ip}:{self.db_port}): {e}")
+            return False
+        finally:
+            if conn is not None:
+                conn.close()
 
     def to_3d_pose(self, x_local: float, y_local: float, theta_local: float, map_id: str):
         """Convert local map coordinates to global 3D scene coordinates"""
@@ -649,19 +665,9 @@ class FMSBridge:
             logger.error(f"Error parsing MQTT message: {e}")
 
     async def _broadcast_loop(self):
-        """Broadcasts 10Hz PATCH diffs to all connected WebSocket clients with periodic FMS DB refresh"""
-        loop_counter = 0
+        """Broadcast 10Hz PATCH diffs without blocking on external database I/O."""
         while self._is_running:
             await asyncio.sleep(0.1)
-            loop_counter += 1
-            
-            # Periodic DB sync every 5 seconds (50 ticks) to catch any FMS UI updates
-            if loop_counter % 50 == 0:
-                try:
-                    self.load_robots_from_db()
-                except Exception as e:
-                    logger.debug(f"Periodic FMS DB sync error: {e}")
-
             if not self.active_websockets:
                 continue
 
@@ -678,12 +684,26 @@ class FMSBridge:
             for ws in dead_ws:
                 self.active_websockets.discard(ws)
 
+    async def _db_sync_loop(self):
+        """Refresh FMS inventory off the event loop with bounded backoff."""
+        failures = 0
+        while self._is_running:
+            success = await asyncio.to_thread(self.load_robots_from_db)
+            if success:
+                failures = 0
+                delay = self.db_refresh_seconds
+            else:
+                failures += 1
+                delay = min(self.retry_max_seconds, 5.0 * (2 ** min(failures - 1, 6)))
+            await asyncio.sleep(delay)
+
     async def _fms_datasocket_loop(self):
         """Connects directly to authoritative FMS Drogon dataSocket WebSocket (ws://192.168.5.105:9009/dataSocket?mapId=110)"""
         if not WEBSOCKETS_AVAILABLE:
             return
             
         uri = f"ws://{self.fms_ip}:9009/dataSocket?mapId=110"
+        failures = 0
         while self._is_running:
             try:
                 logger.info(f"Connecting to FMS authoritative dataSocket: {uri}...")
@@ -692,6 +712,7 @@ class FMSBridge:
                     self.mode = "LIVE"
                     while self._is_running:
                         msg = await ws.recv()
+                        failures = 0
                         self.last_mqtt_packet_time = time.time()
                         self.total_packets_received += 1
                         try:
@@ -765,15 +786,16 @@ class FMSBridge:
                         except Exception as e:
                             logger.debug(f"Error parsing dataSocket payload: {e}")
             except Exception as e:
-                logger.debug(f"FMS dataSocket error: {e}. Retrying in 3s...")
-                await asyncio.sleep(3.0)
+                failures += 1
+                delay = min(self.retry_max_seconds, 3.0 * (2 ** min(failures - 1, 6)))
+                logger.debug(f"FMS dataSocket error: {e}. Retrying in {delay:.0f}s...")
+                await asyncio.sleep(delay)
 
     async def start(self):
         """Initialize and start the FMS bridge"""
         self._is_running = True
         logger.info(f"Starting FMS Bridge (FMS Server: {self.fms_ip}:{self.mqtt_port})...")
-        self.load_offset_maps_from_db()
-        self.load_robots_from_db()
+        self._offset_task = asyncio.create_task(asyncio.to_thread(self.load_offset_maps_from_db))
 
         if MQTT_AVAILABLE:
             try:
@@ -783,6 +805,7 @@ class FMSBridge:
                 self._mqtt_client.on_connect = self._on_mqtt_connect
                 self._mqtt_client.on_disconnect = self._on_mqtt_disconnect
                 self._mqtt_client.on_message = self._on_mqtt_message
+                self._mqtt_client.reconnect_delay_set(min_delay=5, max_delay=60)
 
                 self._mqtt_client.connect_async(self.fms_ip, self.mqtt_port, 60)
                 self._mqtt_client.loop_start()
@@ -792,6 +815,7 @@ class FMSBridge:
 
         # Start broadcast task and direct FMS dataSocket client
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
+        self._db_sync_task = asyncio.create_task(self._db_sync_loop())
         if WEBSOCKETS_AVAILABLE:
             self._datasocket_task = asyncio.create_task(self._fms_datasocket_loop())
         logger.info("FMS Bridge started successfully.")
@@ -803,6 +827,10 @@ class FMSBridge:
             self._broadcast_task.cancel()
         if self._datasocket_task:
             self._datasocket_task.cancel()
+        if self._db_sync_task:
+            self._db_sync_task.cancel()
+        if self._offset_task:
+            self._offset_task.cancel()
         if self._mqtt_client:
             try:
                 self._mqtt_client.loop_stop()
