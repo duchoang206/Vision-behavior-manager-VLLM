@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createFactoryFloor, createRobotTrail, disposeTwinObject, getFactoryView, updateRobotTrail } from '../../lib/factory-twin-scene';
 import { useTab } from '../TabContext';
 import styles from './RobotMap3DView.module.css';
@@ -206,6 +207,102 @@ interface CalibratedCamera {
   method?: string;
   save_id?: string;
   yaw?: number | null;
+}
+
+interface TwinGlbConfig {
+  url: string;
+  name: string;
+  rotationY: number;
+  positionY: number;
+  scale?: number;
+  statusMeshPattern?: RegExp;
+}
+
+const ROBOT_GLB_CONFIGS: Record<string, TwinGlbConfig> = {
+  '28100': {
+    url: '/models/robots/robot-28100.glb',
+    name: 'robot28100Glb',
+    rotationY: Math.PI / 2,
+    positionY: 0.01,
+    statusMeshPattern: /^Light_/i,
+  },
+  '6868': {
+    url: '/models/robots/robot-6868.glb',
+    name: 'robot6868Glb',
+    rotationY: 0,
+    positionY: 0.01,
+    statusMeshPattern: /^LED/i,
+  },
+  '2001': {
+    url: '/models/robots/robot-2001.glb',
+    name: 'robot2001Glb',
+    rotationY: Math.PI / 2,
+    positionY: 0.01,
+  },
+};
+
+const RACK_GLB_CONFIG: TwinGlbConfig = {
+  url: '/models/racks/rack.glb',
+  name: 'rackGlb',
+  rotationY: 0,
+  positionY: 0.01,
+};
+
+const twinGlbLoader = new GLTFLoader();
+
+function robotModelKey(robotId: string) {
+  return robotId.trim().replace(/^robot[\s_-]*/i, '');
+}
+
+function robotGlbConfig(robotId: string) {
+  return ROBOT_GLB_CONFIGS[robotModelKey(robotId)];
+}
+
+function robotRackMountHeight(robotId: string) {
+  switch (robotModelKey(robotId)) {
+    case '28100': return 0.25;
+    case '2001': return 0.65;
+    case '6868': return 0.82;
+    default: return 0.38;
+  }
+}
+
+function prepareTwinGlb(modelRoot: THREE.Group, config: TwinGlbConfig) {
+  modelRoot.name = config.name;
+  modelRoot.rotation.y = config.rotationY;
+  modelRoot.position.y = config.positionY;
+  modelRoot.scale.setScalar(config.scale ?? 1);
+
+  const statusMaterials: THREE.MeshStandardMaterial[] = [];
+  modelRoot.traverse(object => {
+    if (!(object instanceof THREE.Mesh)) return;
+    object.castShadow = true;
+    object.receiveShadow = true;
+
+    if (config.statusMeshPattern?.test(object.name)) {
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      const clonedMaterials = materials.map(material => material.clone());
+      object.material = Array.isArray(object.material) ? clonedMaterials : clonedMaterials[0];
+      clonedMaterials.forEach(material => {
+        if (material instanceof THREE.MeshStandardMaterial) statusMaterials.push(material);
+      });
+    }
+  });
+
+  return statusMaterials;
+}
+
+function loadTwinGlb(
+  config: TwinGlbConfig,
+  onReady: (modelRoot: THREE.Group, statusMaterials: THREE.MeshStandardMaterial[]) => void,
+  onError: (error: unknown) => void,
+) {
+  twinGlbLoader.load(
+    config.url,
+    ({ scene: modelRoot }) => onReady(modelRoot, prepareTwinGlb(modelRoot, config)),
+    undefined,
+    onError,
+  );
 }
 
 // ─── Color Palette for Statuses ─────────────────────────────────────────────
@@ -568,12 +665,14 @@ const mergeStableEntities = <T extends {
   incoming: Record<string, T>,
   nowMs: number,
   minJumpMeters = 2.5,
+  isRack = false,
 ): Record<string, T> => {
   const next: Record<string, T> = {};
+  const preserveMs = isRack ? 1200 : UI_ENTITY_PRESERVE_MS;
 
   Object.entries(prev).forEach(([id, item]) => {
     const lastSeen = item.ui_last_seen ?? 0;
-    if (lastSeen && nowMs - lastSeen < UI_ENTITY_PRESERVE_MS) {
+    if (lastSeen && nowMs - lastSeen < preserveMs) {
       next[id] = item;
     }
   });
@@ -585,7 +684,8 @@ const mergeStableEntities = <T extends {
     const dist = distance3(prevItem?.position, item.position);
     const maxSpeed = Math.max(prevItem?.max_speed ?? item.max_speed ?? 2.0, 0.5);
     const allowedJump = Math.max(minJumpMeters, maxSpeed * dtSec * 4.0 + 0.4);
-    const shouldHoldPose = Boolean(prevItem && lastSeen && nowMs - lastSeen < UI_POSE_JUMP_WINDOW_MS && dist > allowedJump);
+    // Racks are already stabilized by backend RackPositionStabilizer, never hold pose for racks!
+    const shouldHoldPose = !isRack && Boolean(prevItem && lastSeen && nowMs - lastSeen < UI_POSE_JUMP_WINDOW_MS && dist > allowedJump);
     
     const authoritative = item.fms_position?.every(Number.isFinite) ? item.fms_position : null;
 
@@ -680,6 +780,11 @@ export default function RobotMap3DView() {
     labelTexture: THREE.CanvasTexture;
     pulseRing: THREE.Mesh;
     rackMountGroup: THREE.Group;
+    rackMountProceduralGroup: THREE.Group;
+    proceduralModelGroup: THREE.Group;
+    glbModelRoot?: THREE.Group;
+    rackMountGlbRoot?: THREE.Group;
+    glbStatusMaterials?: THREE.MeshStandardMaterial[];
     lastLabelKey?: string;
   }>>(new Map());
 
@@ -702,6 +807,8 @@ export default function RobotMap3DView() {
     labelCanvas: HTMLCanvasElement;
     labelCtx: CanvasRenderingContext2D;
     labelTexture: THREE.CanvasTexture;
+    proceduralModelGroup: THREE.Group;
+    glbModelRoot?: THREE.Group;
     lastLabelKey?: string;
   }>>(new Map());
 
@@ -842,7 +949,7 @@ export default function RobotMap3DView() {
           const current = telemetryRef.current;
           if (data.robots) current.robots = mergeStableEntities(current.robots, normalizeListOrMap<RobotData>(data.robots), nowMs, 2.5);
           if (data.persons) current.persons = mergeStableEntities(current.persons, normalizeListOrMap<PersonData>(data.persons), nowMs, 1.8);
-          if (data.racks) current.racks = mergeStableEntities(current.racks, normalizeListOrMap<RackData>(data.racks), nowMs, 1.8);
+          if (data.racks) current.racks = mergeStableEntities(current.racks, normalizeListOrMap<RackData>(data.racks), nowMs, 1.8, true);
           if (document.hidden || activeTabRef.current !== 'robot_map' || nowMs - lastUiAt < (viewModeRef.current === '3D' ? 200 : 60)) return;
           lastUiAt = nowMs;
           setTelemetryConnected(true);
@@ -1302,6 +1409,10 @@ export default function RobotMap3DView() {
         group.userData.robotId = rid;
         const lowProfileRobot = /28100|6969/i.test(r.id);
         const forkliftRobot = /2001/i.test(r.id);
+        const modelConfig = robotGlbConfig(r.id);
+        const proceduralModelGroup = new THREE.Group();
+        proceduralModelGroup.name = 'proceduralRobotFallback';
+        group.add(proceduralModelGroup);
 
         // 0. Realistic Contact Shadow on floor
         const shadowGeo = new THREE.PlaneGeometry(1.2, 0.9);
@@ -1326,7 +1437,7 @@ export default function RobotMap3DView() {
         const lower = new THREE.Mesh(lowerGeo, lowerMat);
         lower.position.y = 0.10;
         lower.castShadow = true;
-        group.add(lower);
+        proceduralModelGroup.add(lower);
 
         // B. Main Body (Vibrant Emerald Green Industrial Finish matching FMS Image 2)
         const isOffline = r.status === 'OFFLINE';
@@ -1343,7 +1454,7 @@ export default function RobotMap3DView() {
         const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
         bodyMesh.position.y = 0.22;
         bodyMesh.castShadow = true;
-        group.add(bodyMesh);
+        proceduralModelGroup.add(bodyMesh);
 
         // C. Top Shell (Beveled cover)
         const topGeo = new RoundedBoxGeometry(0.78, 0.05, 0.54, 3, 0.035);
@@ -1354,7 +1465,7 @@ export default function RobotMap3DView() {
         });
         const topShell = new THREE.Mesh(topGeo, topMat);
         topShell.position.y = 0.32;
-        group.add(topShell);
+        proceduralModelGroup.add(topShell);
 
         // D. Front Black Sensor Visor (Sleek dark glass visor matching FMS Image 2)
         const visorGeo = new RoundedBoxGeometry(0.10, 0.12, 0.56, 3, 0.025);
@@ -1365,7 +1476,7 @@ export default function RobotMap3DView() {
         });
         const visor = new THREE.Mesh(visorGeo, visorMat);
         visor.position.set(0.44, 0.22, 0);
-        group.add(visor);
+        proceduralModelGroup.add(visor);
 
         if (forkliftRobot) {
           const forkMaterial = new THREE.MeshStandardMaterial({ color: 0xb9c4cf, metalness: 0.82, roughness: 0.22 });
@@ -1373,13 +1484,13 @@ export default function RobotMap3DView() {
           forkRail.position.set(0.67, 0.16, -0.17);
           const forkRailTwo = forkRail.clone();
           forkRailTwo.position.z = 0.17;
-          group.add(forkRail, forkRailTwo);
+          proceduralModelGroup.add(forkRail, forkRailTwo);
         }
         if (lowProfileRobot) {
           const bumperMaterial = new THREE.MeshStandardMaterial({ color: 0xff8a34, emissive: 0x321304, emissiveIntensity: 0.25, metalness: 0.35, roughness: 0.3 });
           const bumper = new THREE.Mesh(new RoundedBoxGeometry(0.90, 0.045, 0.60, 3, 0.02), bumperMaterial);
           bumper.position.set(0, 0.31, 0);
-          group.add(bumper);
+          proceduralModelGroup.add(bumper);
         }
 
         // Internal Glowing LiDAR diode in Visor
@@ -1387,7 +1498,7 @@ export default function RobotMap3DView() {
         const diodeMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: isOffline ? 0.2 : 2.0 });
         const diode = new THREE.Mesh(diodeGeo, diodeMat);
         diode.position.set(0.48, 0.22, 0);
-        group.add(diode);
+        proceduralModelGroup.add(diode);
 
         // E. Dual Front LED Headlights (Bright cyan illumination)
         const headlightMat = new THREE.MeshStandardMaterial({
@@ -1398,7 +1509,7 @@ export default function RobotMap3DView() {
         [-0.20, 0.20].forEach((zOffset) => {
           const lightMesh = new THREE.Mesh(new RoundedBoxGeometry(0.04, 0.04, 0.08, 2, 0.012), headlightMat);
           lightMesh.position.set(0.48, 0.22, zOffset);
-          group.add(lightMesh);
+          proceduralModelGroup.add(lightMesh);
         });
 
         // F. Dual Rear Taillights (Ruby Red)
@@ -1410,7 +1521,7 @@ export default function RobotMap3DView() {
         [-0.20, 0.20].forEach((zOffset) => {
           const tailMesh = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.04, 0.08, 2, 0.009), tailLightMat);
           tailMesh.position.set(-0.47, 0.22, zOffset);
-          group.add(tailMesh);
+          proceduralModelGroup.add(tailMesh);
         });
 
         // G. Top Turntable Lifting Disc (Docking platform for Racks)
@@ -1422,7 +1533,7 @@ export default function RobotMap3DView() {
         });
         const turntable = new THREE.Mesh(turntableGeo, turntableMat);
         turntable.position.set(0, 0.36, 0);
-        group.add(turntable);
+        proceduralModelGroup.add(turntable);
 
         // H. Glowing Center Beacon / Status LED
         const beaconGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.03, 16);
@@ -1433,7 +1544,7 @@ export default function RobotMap3DView() {
         });
         const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
         beaconMesh.position.set(0, 0.39, 0);
-        group.add(beaconMesh);
+        proceduralModelGroup.add(beaconMesh);
 
         // I. 4 Rugged Rubber Tread Wheels with Metallic Rims
         const tireGeo = new THREE.CylinderGeometry(0.10, 0.10, 0.07, 18);
@@ -1455,34 +1566,37 @@ export default function RobotMap3DView() {
           const rim = new THREE.Mesh(rimGeo, rimMat);
           wheelGroup.add(tire);
           wheelGroup.add(rim);
-          group.add(wheelGroup);
+          proceduralModelGroup.add(wheelGroup);
         });
 
         // J. Dynamic Rack Mount on Robot Back (1-Tier Single Deck Platform & Cargo)
         const rackMountGroup = new THREE.Group();
         rackMountGroup.name = 'rackMount';
+        const rackMountProceduralGroup = new THREE.Group();
+        rackMountProceduralGroup.name = 'proceduralRackMountFallback';
+        rackMountGroup.add(rackMountProceduralGroup);
         const postGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.32, 8);
         const postMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8, roughness: 0.2 });
         [[-0.28, -0.20], [0.28, -0.20], [-0.28, 0.20], [0.28, 0.20]].forEach(p => {
           const post = new THREE.Mesh(postGeo, postMat);
           post.position.set(p[0], 0.38 + 0.16, p[1]);
-          rackMountGroup.add(post);
+          rackMountProceduralGroup.add(post);
         });
         const shelfGeo = new THREE.BoxGeometry(0.68, 0.03, 0.48);
         const shelfMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed, metalness: 0.5, roughness: 0.3 });
         const singleDeck = new THREE.Mesh(shelfGeo, shelfMat);
         singleDeck.position.set(0, 0.38 + 0.12, 0);
-        rackMountGroup.add(singleDeck);
+        rackMountProceduralGroup.add(singleDeck);
 
         const boxGeo = new THREE.BoxGeometry(0.50, 0.22, 0.36);
         const cargoBox = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.2 }));
         cargoBox.position.set(0, 0.38 + 0.24, 0);
-        rackMountGroup.add(cargoBox);
+        rackMountProceduralGroup.add(cargoBox);
 
         const lidGeo = new THREE.BoxGeometry(0.52, 0.03, 0.38);
         const cargoLid = new THREE.Mesh(lidGeo, new THREE.MeshStandardMaterial({ color: 0x0369a1, roughness: 0.3, metalness: 0.4 }));
         cargoLid.position.set(0, 0.38 + 0.36, 0);
-        rackMountGroup.add(cargoLid);
+        rackMountProceduralGroup.add(cargoLid);
 
         rackMountGroup.visible = Boolean(r.has_rack || r.carried_rack_id);
         group.add(rackMountGroup);
@@ -1525,9 +1639,54 @@ export default function RobotMap3DView() {
           labelTexture,
           pulseRing,
           rackMountGroup,
+          rackMountProceduralGroup,
+          proceduralModelGroup,
           lastLabelKey: labelKey,
         };
         robotMeshesRef.current.set(rid, meshData);
+
+        if (modelConfig) {
+          loadTwinGlb(
+            modelConfig,
+            (modelRoot, glbStatusMaterials) => {
+              const activeMeshData = robotMeshesRef.current.get(rid);
+              if (!activeMeshData || activeMeshData.group !== group) {
+                disposeTwinObject(modelRoot);
+                return;
+              }
+
+              activeMeshData.glbModelRoot = modelRoot;
+              activeMeshData.glbStatusMaterials = glbStatusMaterials;
+              activeMeshData.proceduralModelGroup.visible = false;
+              activeMeshData.group.add(modelRoot);
+            },
+            error => {
+              console.warn(`Unable to load ${r.id} GLB; keeping procedural fallback.`, error);
+            },
+          );
+        }
+
+        loadTwinGlb(
+          {
+            ...RACK_GLB_CONFIG,
+            name: `${robotModelKey(r.id) || rid}CarriedRackGlb`,
+            positionY: robotRackMountHeight(r.id),
+          },
+          modelRoot => {
+            const activeMeshData = robotMeshesRef.current.get(rid);
+            if (!activeMeshData || activeMeshData.group !== group) {
+              disposeTwinObject(modelRoot);
+              return;
+            }
+
+            activeMeshData.rackMountGlbRoot = modelRoot;
+            activeMeshData.rackMountProceduralGroup.visible = false;
+            activeMeshData.rackMountGroup.add(modelRoot);
+          },
+          error => {
+            console.warn(`Unable to load carried Rack GLB for ${r.id}; keeping procedural fallback.`, error);
+          },
+        );
       }
 
       // Live updates
@@ -1553,6 +1712,11 @@ export default function RobotMap3DView() {
       (meshData.beaconMesh.material as THREE.MeshStandardMaterial).color.set(beaconColor);
       (meshData.beaconMesh.material as THREE.MeshStandardMaterial).emissive.set(beaconEmissive);
       (meshData.beaconMesh.material as THREE.MeshStandardMaterial).emissiveIntensity = isOffline ? 0.0 : 1.5;
+      meshData.glbStatusMaterials?.forEach(material => {
+        material.color.set(beaconColor);
+        material.emissive.set(beaconEmissive);
+        material.emissiveIntensity = isOffline ? 0.0 : 1.5;
+      });
       
       meshData.rackMountGroup.visible = Boolean(r.has_rack || r.carried_rack_id);
       meshData.labelSprite.visible = showLabels;
@@ -1681,6 +1845,9 @@ export default function RobotMap3DView() {
       if (!meshData) {
         const group = new THREE.Group();
         group.userData.rackId = rkid;
+        const proceduralModelGroup = new THREE.Group();
+        proceduralModelGroup.name = 'proceduralRackFallback';
+        group.add(proceduralModelGroup);
 
         // 1-Tier Industrial Warehouse Rack (Kệ hàng 1 tầng minh họa)
         const postGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.46, 8);
@@ -1689,7 +1856,7 @@ export default function RobotMap3DView() {
           const post = new THREE.Mesh(postGeo, postMat);
           post.position.set(p[0], 0.23, p[1]);
           post.castShadow = true;
-          group.add(post);
+          proceduralModelGroup.add(post);
         });
 
         // Single Shelf Deck Platform
@@ -1698,20 +1865,20 @@ export default function RobotMap3DView() {
         const shelf = new THREE.Mesh(shelfGeo, shelfMat);
         shelf.position.set(0, 0.16, 0);
         shelf.castShadow = true;
-        group.add(shelf);
+        proceduralModelGroup.add(shelf);
 
         // Single Tier Industrial Cargo Container Box
         const boxGeo = new THREE.BoxGeometry(0.65, 0.28, 0.52);
         const cargoBox = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x0284c7, roughness: 0.35, metalness: 0.2 }));
         cargoBox.position.set(0, 0.32, 0);
         cargoBox.castShadow = true;
-        group.add(cargoBox);
+        proceduralModelGroup.add(cargoBox);
 
         // Container Lid
         const lidGeo = new THREE.BoxGeometry(0.67, 0.03, 0.54);
         const cargoLid = new THREE.Mesh(lidGeo, new THREE.MeshStandardMaterial({ color: 0x0369a1, roughness: 0.3, metalness: 0.4 }));
         cargoLid.position.set(0, 0.47, 0);
-        group.add(cargoLid);
+        proceduralModelGroup.add(cargoLid);
 
         const labelKey = `${rk.id}:${rk.status}:${rk.carried_by}`;
         const { sprite: labelSprite, canvas: labelCanvas, ctx: labelCtx, texture: labelTexture } = createRackLabelSprite(
@@ -1730,9 +1897,28 @@ export default function RobotMap3DView() {
           labelCanvas,
           labelCtx,
           labelTexture,
+          proceduralModelGroup,
           lastLabelKey: labelKey,
         };
         rackMeshesRef.current.set(rkid, meshData);
+
+        loadTwinGlb(
+          RACK_GLB_CONFIG,
+          modelRoot => {
+            const activeMeshData = rackMeshesRef.current.get(rkid);
+            if (!activeMeshData || activeMeshData.group !== group) {
+              disposeTwinObject(modelRoot);
+              return;
+            }
+
+            activeMeshData.glbModelRoot = modelRoot;
+            activeMeshData.proceduralModelGroup.visible = false;
+            activeMeshData.group.add(modelRoot);
+          },
+          error => {
+            console.warn(`Unable to load Rack GLB for ${rk.id}; keeping procedural fallback.`, error);
+          },
+        );
       }
 
       meshData.group.visible = true;
@@ -1773,7 +1959,7 @@ export default function RobotMap3DView() {
           x: r.position[0],
           z: r.position[2],
           sprite: meshData.labelSprite,
-          baseY: 1.35,
+          baseY: (r.has_rack || r.carried_rack_id) ? robotRackMountHeight(r.id) + 0.90 : 1.35,
         });
       }
     });
