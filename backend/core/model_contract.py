@@ -1,6 +1,7 @@
 import ast
 import hashlib
 import json
+import os
 import re
 
 
@@ -61,33 +62,41 @@ def inspect_onnx(path, labels=None):
             raise ValueError("Export ONNX half=False; backend sẽ tối ưu engine FP16.")
         if not re.fullmatch(r"[A-Za-z0-9_./-]{1,120}", tensor.name):
             raise ValueError("Tên tensor không được chứa ký tự cấu hình đặc biệt.")
-    shape = [dimension.dim_value for dimension in inputs[0].type.tensor_type.shape.dim]
-    output = [dimension.dim_value for dimension in outputs[0].type.tensor_type.shape.dim]
-    if len(shape) != 4 or shape[:2] != [1, 3] or any(size < 128 or size > 1920 or size % 32 for size in shape[2:]):
-        raise ValueError("Export batch=1, dynamic=False, RGB NCHW; chiều ảnh 128–1920, chia hết cho 32.")
+    input_dims = inputs[0].type.tensor_type.shape.dim
+    output_dims = outputs[0].type.tensor_type.shape.dim
+    shape = [dimension.dim_value if dimension.dim_value > 0 else -1 for dimension in input_dims]
+    output = [dimension.dim_value if dimension.dim_value > 0 else -1 for dimension in output_dims]
+    is_dynamic_batch = shape[0] in (-1, 0) or bool(input_dims[0].dim_param) or bool(output_dims[0].dim_param)
+    batch_valid = shape[0] in (1, -1, 0) or is_dynamic_batch
+    if len(shape) != 4 or not batch_valid or shape[1] != 3 or any(size < 128 or size > 1920 or (size % 32 != 0) for size in shape[2:] if size > 0):
+        raise ValueError("Export batch=1 hoặc dynamic batch (batch=-1), RGB NCHW; chiều ảnh 128–1920, chia hết cho 32.")
     if task == "detect":
-        if len(output) != 3 or output[0] != 1 or output[1] != 4 + len(names) or not 256 < output[2] <= 100000:
-            raise ValueError("Output detect phải là [1, 4 + số lớp, anchors] của YOLOv8/YOLO11, nms=False.")
+        if len(output) != 3 or output[0] not in (1, -1, 0) or output[1] != 4 + len(names) or not 256 < output[2] <= 100000:
+            raise ValueError("Output detect phải là [1 hoặc batch, 4 + số lớp, anchors] của YOLOv8/YOLO11, nms=False.")
     elif task == "segment":
-        prototype = [dimension.dim_value for dimension in outputs[1].type.tensor_type.shape.dim]
-        if (len(output) != 3 or output[0] != 1 or output[1] <= 4 + len(names) or not 256 < output[2] <= 100000
-                or len(prototype) != 4 or prototype[0] != 1 or prototype[1] < 8 or min(prototype[2:]) < 8):
-            raise ValueError("Output segmentation phải gồm detection [1, 4 + classes + mask_coeffs, anchors] và prototype [1, mask_coeffs, H, W].")
+        prototype = [dimension.dim_value if dimension.dim_value > 0 else -1 for dimension in outputs[1].type.tensor_type.shape.dim]
+        if (len(output) != 3 or output[0] not in (1, -1, 0) or output[1] <= 4 + len(names) or not 256 < output[2] <= 100000
+                or len(prototype) != 4 or prototype[0] not in (1, -1, 0) or prototype[1] < 8 or min(prototype[2:]) < 8):
+            raise ValueError("Output segmentation phải gồm detection [1 hoặc batch, 4 + classes + mask_coeffs, anchors] và prototype [1 hoặc batch, mask_coeffs, H, W].")
     elif task == "pose":
-        if len(names) != 1 or len(output) != 3 or output[0] != 1 or output[1] != 56 or not 256 < output[2] <= 100000:
-            raise ValueError("Pose cần đúng một nhãn người và output [1, 56, anchors] (17 COCO keypoints), nms=False.")
+        if len(names) != 1 or len(output) != 3 or output[0] not in (1, -1, 0) or output[1] != 56 or not 256 < output[2] <= 100000:
+            raise ValueError("Pose cần đúng một nhãn người và output [1 hoặc batch, 56, anchors] (17 COCO keypoints), nms=False.")
     elif task == "obb":
-        if len(output) != 3 or output[0] != 1 or output[1] != 5 + len(names) or not 256 < output[2] <= 100000:
-            raise ValueError("Output OBB phải là [1, 5 + số lớp, anchors], nms=False.")
+        if len(output) != 3 or output[0] not in (1, -1, 0) or output[1] != 5 + len(names) or not 256 < output[2] <= 100000:
+            raise ValueError("Output OBB phải là [1 hoặc batch, 5 + số lớp, anchors], nms=False.")
     elif task == "classify":
-        if len(output) != 2 or output[0] != 1 or output[1] != len(names):
-            raise ValueError("Output classifier phải là [1, số lớp].")
+        if len(output) != 2 or output[0] not in (1, -1, 0) or output[1] != len(names):
+            raise ValueError("Output classifier phải là [1 hoặc batch, số lớp].")
     digest = hashlib.sha256()
     with open(path, "rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
+    canonical_shape = [1, 3, shape[2], shape[3]]
+    canonical_output = [1, output[1], output[2]]
+    max_batch = 8 if is_dynamic_batch else 1
     return {"labels": names, "input": inputs[0].name, "output": outputs[0].name,
-            "outputs": [item.name for item in outputs], "shape": shape, "output_shape": output,
+            "outputs": [item.name for item in outputs], "shape": canonical_shape, "output_shape": canonical_output,
+            "dynamic_batch": is_dynamic_batch, "max_batch": max_batch,
             "sha256": digest.hexdigest(), "task": task, "model_type": task,
             "contract": f"yolo_raw_{task}_v8_v11", "precision": "fp16",
             "labels_source": "manual" if labels else "onnx_metadata"}
@@ -96,6 +105,8 @@ def inspect_onnx(path, labels=None):
 def infer_config(directory, metadata, parser):
     task = metadata.get("model_type") or metadata.get("task", "detect")
     task = {"seg": "segment", "segmentation": "segment"}.get(str(task).lower(), str(task).lower())
+    batch_size = metadata.get("max_batch", 8) if metadata.get("dynamic_batch") else 1
+    infer_interval = os.getenv("DEEPSTREAM_INFER_INTERVAL", "1")
     if task == "segment":
         return f"""[property]
 gie-unique-id=1
@@ -104,13 +115,13 @@ net-scale-factor=0.00392156862745098
 model-color-format=0
 model-engine-file={directory}/detector.engine
 labelfile-path={directory}/labels.txt
-batch-size=1
+batch-size={batch_size}
 infer-dims=3;{metadata['shape'][2]};{metadata['shape'][3]}
 num-detected-classes={len(metadata['labels'])}
 network-mode=2
 network-type=3
 process-mode=1
-interval=0
+interval={infer_interval}
 cluster-mode=4
 maintain-aspect-ratio=1
 symmetric-padding=1
@@ -131,13 +142,13 @@ net-scale-factor=0.00392156862745098
 model-color-format=0
 model-engine-file={directory}/detector.engine
 labelfile-path={directory}/labels.txt
-batch-size=1
+batch-size={batch_size}
 infer-dims=3;{metadata['shape'][2]};{metadata['shape'][3]}
 num-detected-classes=1
 network-mode=2
 network-type=0
 process-mode=1
-interval=0
+interval={infer_interval}
 cluster-mode=2
 maintain-aspect-ratio=1
 symmetric-padding=1
@@ -160,13 +171,13 @@ net-scale-factor=0.00392156862745098
 model-color-format=0
 model-engine-file={directory}/detector.engine
 labelfile-path={directory}/labels.txt
-batch-size=1
+batch-size={batch_size}
 infer-dims=3;{metadata['shape'][2]};{metadata['shape'][3]}
 num-detected-classes={len(metadata['labels'])}
 network-mode=2
 network-type=0
 process-mode=1
-interval=0
+interval={infer_interval}
 cluster-mode=2
 maintain-aspect-ratio=1
 symmetric-padding=1

@@ -287,11 +287,14 @@ class CustomDetector:
 
         base_config_path = Path(runtime["config"])
         base_config_text = base_config_path.read_text()
+        default_interval = os.getenv("DEEPSTREAM_INFER_INTERVAL", "1")
         lines = []
         for line in base_config_text.splitlines():
             stripped = line.strip()
             if stripped.startswith("[class-attrs-") and not stripped.startswith("[class-attrs-all]"):
                 break
+            if stripped.startswith("interval=") and default_interval:
+                line = f"interval={default_interval}"
             lines.append(line)
         cleaned_config = "\n".join(lines).strip()
 
@@ -312,7 +315,7 @@ class CustomDetector:
                     except (ValueError, TypeError):
                         pass
             if min_thresh is not None:
-                nvinfer_thresh = max(0.005, min(0.25, round(min_thresh, 4)))
+                nvinfer_thresh = max(0.18, min(0.35, round(min_thresh, 4)))
                 class_sections.append(f"[class-attrs-{class_id}]\npre-cluster-threshold={nvinfer_thresh}")
 
         runtime_config_file = directory / f"nvinfer-{generation}.txt"
