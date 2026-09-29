@@ -31,7 +31,7 @@ from core.robot_spatial_identity import robot_spatial_identity
 from core.registered_identity_metrics import registered_identity_metrics
 from core.metadata_fusion import MetadataFusion
 from core.metadata_broadcaster import LatestMetadataBroadcaster, close_metadata_socket
-from core.mediamtx_client import mediamtx_client
+from core.mediamtx_client import camera_relay_url, mediamtx_client
 from core.registered_target_mask import decode_frame, validate_mask, registered_target_mask_segmenter
 from core.online_calibration import OnlineRobotCalibration
 from core.recording_store import RecordingStore
@@ -95,6 +95,41 @@ ENABLE_CPU_TRACKER_FALLBACK = os.getenv("ENABLE_CPU_TRACKER_FALLBACK", "1").lowe
 def legacy_deepstream_enabled() -> bool:
     """The bundled Pose sample is opt-in; uploaded deployments own inference."""
     return os.getenv("ENABLE_LEGACY_DEEPSTREAM_PIPELINE", "0").lower() in {"1", "true", "yes"}
+
+
+def _camera_start_stagger_seconds() -> float:
+    try:
+        return max(0.0, min(10.0, float(os.getenv("CAMERA_START_STAGGER_SECONDS", "2.0"))))
+    except ValueError:
+        return 2.0
+
+
+def _camera_retry_gap_seconds() -> float:
+    """Minimum quiet period between health probes across all offline cameras."""
+    try:
+        return max(1.0, min(60.0, float(os.getenv("CAMERA_RETRY_MIN_GAP_SECONDS", "15.0"))))
+    except ValueError:
+        return 15.0
+
+
+async def _probe_camera_relay(cam_id: str, rtsp_url: str, timeout: float = 12.0) -> bool:
+    """Register an idle path, then verify that it yields real video frames."""
+    try:
+        await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, rtsp_url, True)
+        from check_rtsp import is_rtsp_valid_async
+        return await is_rtsp_valid_async(camera_relay_url(cam_id), timeout=timeout)
+    except Exception:
+        return False
+
+
+async def _activate_camera_runtime(cam_id: str, rtsp_url: str, start_inference: bool = True):
+    """Activate consumers only after the relay has delivered valid video."""
+    await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, rtsp_url, False)
+    ffmpeg_recorder.add_camera(cam_id)
+    await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
+    if start_inference and legacy_deepstream_enabled():
+        deepstream_manager.add_source(cam_id, rtsp_url)
+    _start_cpu_tracker_fallback(cam_id, rtsp_url)
 
 # In-memory registry of active cameras
 cameras: Dict[str, dict] = {}
@@ -831,14 +866,13 @@ async def startup_event():
         cam = _camera_payload_from_db(c, status="offline")
         cameras[cam_id] = cam
 
-        try:
-            await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, cam["rtsp_url"])
-        except Exception as e:
-            print(f"[MediaMTX] Startup proxy path registration failed for {cam_id}: {e}")
-
-    await asyncio.to_thread(ffmpeg_recorder.start, list(cameras))
+    # Do not launch every recorder before camera health is known. Each camera
+    # is probed and activated in sequence so a switch/router recovery does not
+    # receive a seven-stream reconnect burst.
+    await asyncio.to_thread(ffmpeg_recorder.start, [])
     initial_sources = []
     offline_cameras = []
+    startup_stagger = _camera_start_stagger_seconds()
 
     for cam_id, c in cameras.items():
         rtsp_url = c["rtsp_url"]
@@ -857,26 +891,20 @@ async def startup_event():
         if rules:
             behavior_engine.set_rules(cam_id, rules)
 
-        is_reachable = False
-        for attempt in range(2):
-            try:
-                from check_rtsp import is_rtsp_valid_async
-                is_reachable = await is_rtsp_valid_async(rtsp_url, timeout=8)
-                if is_reachable:
-                    break
-            except Exception:
-                is_reachable = False
+        is_reachable = await _probe_camera_relay(cam_id, rtsp_url, timeout=12)
 
         if is_reachable:
             c["status"] = "online"
-            await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
+            await _activate_camera_runtime(cam_id, rtsp_url, start_inference=False)
             initial_sources.append((cam_id, rtsp_url))
             print(f"[Main] Camera {cam_id} reachable - will add to pipeline.", flush=True)
-            _start_cpu_tracker_fallback(cam_id, rtsp_url)
         else:
             c["status"] = "offline"
             offline_cameras.append((cam_id, rtsp_url))
             print(f"[Main] Camera {cam_id} unreachable at startup - kept in DB and will retry.", flush=True)
+
+        if startup_stagger:
+            await asyncio.sleep(startup_stagger)
 
     if legacy_deepstream_enabled():
         deepstream_manager.start(initial_sources=initial_sources if initial_sources else None)
@@ -920,38 +948,43 @@ async def shutdown_event():
 
 
 async def _retry_offline_cameras(offline_list: list, interval: int = 30):
-    """Background task: retry adding offline cameras to the pipeline every `interval` seconds."""
-    remaining = list(offline_list)
+    """Retry cameras independently with staggered exponential backoff."""
+    loop = asyncio.get_running_loop()
+    stagger = max(1.0, _camera_start_stagger_seconds())
+    retry_gap = _camera_retry_gap_seconds()
+    next_probe_at = loop.time()
+    remaining = {
+        cam_id: {"url": rtsp_url, "failures": 0, "due": loop.time() + interval + index * stagger}
+        for index, (cam_id, rtsp_url) in enumerate(offline_list)
+    }
     while remaining:
-        await asyncio.sleep(interval)
-        still_offline = []
-        for cam_id, rtsp_url in remaining:
-            if cam_id not in cameras or cameras[cam_id]["rtsp_url"] != rtsp_url:
-                continue
+        cam_id, state = min(remaining.items(), key=lambda item: item[1]["due"])
+        await asyncio.sleep(max(0.0, max(state["due"], next_probe_at) - loop.time()))
+        rtsp_url = state["url"]
+        if cam_id not in cameras or cameras[cam_id]["rtsp_url"] != rtsp_url:
+            remaining.pop(cam_id, None)
+            continue
 
-            try:
-                await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, rtsp_url)
-                from check_rtsp import is_rtsp_valid_async
-                is_reachable = await is_rtsp_valid_async(rtsp_url, timeout=5)
-            except Exception:
-                is_reachable = False
+        is_reachable = await _probe_camera_relay(cam_id, rtsp_url, timeout=12)
+        # Even when a probe succeeds, let the new stream settle before touching
+        # another offline endpoint. This prevents aggregate reconnect storms.
+        next_probe_at = loop.time() + retry_gap
+        if is_reachable:
+            cameras[cam_id]["status"] = "online"
+            await _activate_camera_runtime(cam_id, rtsp_url)
+            remaining.pop(cam_id, None)
+            print(f"[Main] Camera {cam_id} is now reachable - adding to pipeline.", flush=True)
+            continue
 
-            if is_reachable:
-                cameras[cam_id]["status"] = "online"
-                await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
-                print(f"[Main] Camera {cam_id} is now reachable - adding to pipeline.", flush=True)
-                if legacy_deepstream_enabled():
-                    deepstream_manager.add_source(cam_id, rtsp_url)
-                _start_cpu_tracker_fallback(cam_id, rtsp_url)
-            else:
-                cameras[cam_id]["status"] = "offline"
-                still_offline.append((cam_id, rtsp_url))
+        cameras[cam_id]["status"] = "offline"
+        state["failures"] += 1
+        backoff = min(300.0, float(interval) * (2 ** min(state["failures"], 4)))
+        jitter = (sum(cam_id.encode("utf-8")) % 1000) / 1000.0 * min(15.0, backoff * 0.2)
+        state["due"] = loop.time() + backoff + jitter
+        print(f"[Main] Camera {cam_id} remains offline; retry in {backoff + jitter:.1f}s. ",
+              f"{len(remaining)} camera(s) pending.", flush=True)
 
-        remaining = still_offline
-        if remaining:
-            print(f"[Main] Still waiting for {len(remaining)} offline camera(s) to come online.", flush=True)
-        else:
-            print("[Main] All cameras are now online.", flush=True)
+    print("[Main] All scheduled cameras are now online or removed.", flush=True)
 
 
 
@@ -988,37 +1021,23 @@ async def websocket_events_endpoint(websocket: WebSocket):
 async def add_camera(request: CameraAddRequest):
     cam_id = str(uuid.uuid4())[:8]
     clean_url = sanitize_rtsp_url(request.rtsp_url)
-    
-    # 1. Check RTSP asynchronously with 2.5s timeout (non-blocking)
-    from check_rtsp import is_rtsp_valid_async
-    is_valid = await is_rtsp_valid_async(clean_url, timeout=2.5)
-    
-    status = "online" if is_valid else "offline"
 
-    # 2. Save to DB before runtime registration. If this fails, do not pretend the camera is persistent.
+    # Save first, then probe through the registered relay so credentials never
+    # need to be exposed to a second direct camera client.
     if not db_manager.save_camera(cam_id, request.name, clean_url):
         raise HTTPException(status_code=500, detail="Không thể lưu camera vào PostgreSQL.")
-        
+
     cameras[cam_id] = {
         "id": cam_id,
         "name": request.name,
         "rtsp_url": clean_url,
-        "status": status
+        "status": "offline"
     }
-    
-    # 3. Register Camera Stream in MediaMTX for direct WebRTC/WHEP streaming (background / fast)
-    try:
-        await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, clean_url)
-    except Exception as e:
-        print(f"[MediaMTX] Note: proxy path registration: {e}")
 
-    ffmpeg_recorder.add_camera(cam_id)
-    # 4. A configured camera is persisted even if the RTSP stream is temporarily offline.
+    is_valid = await _probe_camera_relay(cam_id, clean_url, timeout=12)
     if is_valid:
-        await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
-        if legacy_deepstream_enabled():
-            deepstream_manager.add_source(cam_id, clean_url)
-        _start_cpu_tracker_fallback(cam_id, clean_url)
+        cameras[cam_id]["status"] = "online"
+        await _activate_camera_runtime(cam_id, clean_url)
     else:
         asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
     
@@ -1046,28 +1065,18 @@ async def update_camera(cam_id: str, request: CameraUpdateRequest):
     if request.rtsp_url:
         clean_url = sanitize_rtsp_url(request.rtsp_url)
         await asyncio.to_thread(mediamtx_client.stop_preview, cam_id)
+        ffmpeg_recorder.remove_camera(cam_id)
         cam["rtsp_url"] = clean_url
         cam["status"] = "offline"
-        try:
-            await asyncio.to_thread(mediamtx_client.ensure_path, cam_id, clean_url)
-        except Exception:
-            pass
         deepstream_manager.delete_source(cam_id)
         _stop_cpu_tracker_fallback(cam_id)
         await asyncio.to_thread(_stop_template_identity_tracker, cam_id)
 
-        try:
-            from check_rtsp import is_rtsp_valid_async
-            is_valid = await is_rtsp_valid_async(clean_url, timeout=2.5)
-        except Exception:
-            is_valid = False
+        is_valid = await _probe_camera_relay(cam_id, clean_url, timeout=12)
 
         if is_valid:
             cam["status"] = "online"
-            await asyncio.to_thread(mediamtx_client.ensure_preview, cam_id)
-            if legacy_deepstream_enabled():
-                deepstream_manager.add_source(cam_id, clean_url)
-            _start_cpu_tracker_fallback(cam_id, clean_url)
+            await _activate_camera_runtime(cam_id, clean_url)
         else:
             asyncio.ensure_future(_retry_offline_cameras([(cam_id, clean_url)]))
 

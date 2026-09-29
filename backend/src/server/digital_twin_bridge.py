@@ -39,6 +39,7 @@ class DigitalTwinBridge:
         self.persons: Dict[str, Dict[str, Any]] = {}
         self.racks: Dict[str, Dict[str, Any]] = {}
         self.rack_position_stabilizer = RackPositionStabilizer()
+        self._rack_ground_anchors: Dict[str, Tuple[float, float, float]] = {}
         
         # Track history for velocity & heading estimation: { entity_id: [(time, x, y), ...] }
         self.position_history: Dict[str, List[Tuple[float, float, float]]] = {}
@@ -244,19 +245,66 @@ class DigitalTwinBridge:
                 pass
                 
             previous_rack = self.racks.get(rack_id, {})
+            # Determine if this rack is currently carried by any robot or docked
+            is_carried = (previous_rack.get("status") == "CARRIED"
+                          or bool(previous_rack.get("carried_by")))
+            if not is_carried:
+                for r_data in self.vision_robots.values():
+                    if r_data.get("carried_rack_id") == rack_id:
+                        is_carried = True
+                        break
+            if not is_carried and fms_bridge and hasattr(fms_bridge, 'robot_states'):
+                for fms_r in getattr(fms_bridge, 'robot_states', {}).values():
+                    if fms_r.get("carried_rack_id") == rack_id:
+                        is_carried = True
+                        break
+
+            # If this is a newly seen track ID, retire any nearby unobserved rack on same camera to avoid ghost duplicates
+            if rack_id not in self.racks:
+                for old_id, old_data in list(self.racks.items()):
+                    if old_id != rack_id and old_data.get("cam_id") == cam_id:
+                        if now - old_data.get("last_seen", 0) > 0.25:
+                            old_x, old_z = old_data["position"][0], old_data["position"][2]
+                            if math.hypot(world_x - old_x, world_z - old_z) < 3.5:
+                                self.racks.pop(old_id, None)
+                                self.rack_position_stabilizer.forget(old_id)
+                                self._rack_ground_anchors.pop(old_id, None)
+                                break
+
+            # If stored on floor, anchor the contact point against transient leg clipping
+            if not is_carried and snapped_pos is None:
+                anchor = self._rack_ground_anchors.get(rack_id)
+                proj_v = norm_v
+                if anchor and math.hypot(norm_u - anchor[0], norm_v - anchor[1]) < 0.03:
+                    if norm_v < anchor[1]:
+                        proj_v = anchor[1]
+                    else:
+                        self._rack_ground_anchors[rack_id] = (norm_u, norm_v, now)
+                else:
+                    self._rack_ground_anchors[rack_id] = (norm_u, norm_v, now)
+                if proj_v != norm_v:
+                    spatial_anchored = camera_calibrator.project_ground_point(cam_id, norm_u, proj_v)
+                    if spatial_anchored["valid"]:
+                        world_x, world_z = spatial_anchored["x"], spatial_anchored["z"]
+            else:
+                self._rack_ground_anchors.pop(rack_id, None)
+
             final_x, final_z = snapped_pos if snapped_pos is not None else (world_x, world_z)
             (final_x, final_z), position_stable = self._stabilize_rack_position(
                 rack_id, cam_id, final_x, final_z, now,
                 snapped_to_slot=snapped_pos is not None,
-                is_carried=previous_rack.get("status") == "CARRIED",
+                is_carried=is_carried,
             )
+            # When rack is actively moving, update ground anchor so it tracks the relocation smoothly
+            if not position_stable:
+                self._rack_ground_anchors[rack_id] = (norm_u, norm_v, now)
             
             self.racks[rack_id] = {
                 "id": rack_id,
                 "class": "rack",
-                "position": [round(final_x, 2), 0.0, round(final_z, 2)],
-                "status": "STORED",
-                "carried_by": None,
+                "position": [round(final_x, 2), 0.45 if is_carried else 0.0, round(final_z, 2)],
+                "status": "CARRIED" if is_carried else "STORED",
+                "carried_by": previous_rack.get("carried_by"),
                 "roi_slot": slot_name,
                 "snapped_to_fms": bool(snapped_pos),
                 "position_stable": position_stable,
@@ -334,11 +382,13 @@ class DigitalTwinBridge:
         """Removes camera tracks that have not been observed recently"""
         now = time.time()
         for d in [self.vision_robots, self.persons, self.racks]:
-            stale_keys = [k for k, v in d.items() if now - v.get("last_seen", 0) > timeout_sec]
+            stale_timeout = 1.5 if d is self.racks else timeout_sec
+            stale_keys = [k for k, v in d.items() if now - v.get("last_seen", 0) > stale_timeout]
             for k in stale_keys:
                 del d[k]
                 if d is self.racks:
                     self.rack_position_stabilizer.forget(k)
+                    self._rack_ground_anchors.pop(k, None)
 
     def get_latest_telemetry_payload(self, max_age: float = 0.15) -> dict:
         now = time.time()
