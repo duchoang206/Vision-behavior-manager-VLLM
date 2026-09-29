@@ -53,6 +53,7 @@ class FFmpegRecorder:
         self.active_paths = set()
         self.finalized = set()
         self.retry_after = {}
+        self.retry_failures = {}
         self.errors = {}
         self.stop_event = threading.Event()
         self.thread = None
@@ -73,6 +74,8 @@ class FFmpegRecorder:
     def remove_camera(self, camera_id):
         with self.lock:
             self.desired.discard(camera_id)
+            self.retry_after.pop(camera_id, None)
+            self.retry_failures.pop(camera_id, None)
 
     def start(self, camera_ids):
         self.store.initialize()
@@ -147,7 +150,18 @@ class FFmpegRecorder:
         started = datetime.strptime(RECORDING_NAME.fullmatch(current.name)[1], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp()
         stats = current.stat()
         self.store.save(camera_id, relative, started, "recording", stats.st_size, max(0, time.time() - started))
-        return time.time() - stats.st_mtime < 45
+        healthy = time.time() - stats.st_mtime < 45
+        if healthy:
+            self.retry_failures.pop(camera_id, None)
+        return healthy
+
+    def _schedule_retry(self, camera_id):
+        failures = self.retry_failures.get(camera_id, 0) + 1
+        self.retry_failures[camera_id] = failures
+        base = min(300.0, 5.0 * (2 ** min(max(0, failures - 1), 6)))
+        jitter = (sum(camera_id.encode("utf-8")) % 1000) / 1000.0 * min(10.0, base * 0.25)
+        self.retry_after[camera_id] = time.time() + base + jitter
+        return round(base + jitter, 1)
 
     def delete_recording(self, record_id, actor="retention", reason="user"):
         with self.lock:
@@ -163,7 +177,9 @@ class FFmpegRecorder:
             self.finalized.add(record["path"])
 
     def _recover(self):
-        for record in self.store.pending_recovery():
+        pending = self.store.pending_recovery()
+        pending_paths = {record["path"] for record in pending}
+        for record in pending:
             path = self.safe_path(record["path"])
             if record["status"] == "deleting":
                 self.delete_recording(record["id"], "recovery", "complete_pending_delete")
@@ -171,9 +187,17 @@ class FFmpegRecorder:
                 self._finalize(record["camera_id"], path, interrupted=True)
             else:
                 self.store.mark_deleted(record["id"], "recovery", "file_missing")
+
+        # Most files under the recording root are already finalized and indexed.
+        # Re-running ffprobe over the entire archive on every boot can take hours
+        # and used to hold the recorder lock, blocking camera startup meanwhile.
+        indexed_paths = self.store.indexed_paths()
+        self.finalized.update(indexed_paths)
         for path in self.root.glob("*/*.mp4"):
-            if RECORDING_NAME.fullmatch(path.name) and not path.is_symlink():
-                self._finalize(path.parent.name, self.safe_path(str(path.relative_to(self.root))), interrupted=True)
+            relative = str(path.relative_to(self.root))
+            if (relative not in indexed_paths and relative not in pending_paths
+                    and RECORDING_NAME.fullmatch(path.name) and not path.is_symlink()):
+                self._finalize(path.parent.name, self.safe_path(relative), interrupted=True)
 
     def _retention(self):
         cutoff = time.time() - self.retention_hours * 3600
@@ -208,8 +232,9 @@ class FFmpegRecorder:
     def _run(self):
         last_retention = 0
         try:
-            with self.lock:
-                self._recover()
+            # Recovery only touches the archive index/finalized set. Do not hold
+            # the camera lifecycle lock while scanning historical files.
+            self._recover()
             while not self.stop_event.is_set():
                 try:
                     with self.lock:
@@ -222,8 +247,14 @@ class FFmpegRecorder:
                             if (camera_id not in self.desired or not has_space or job["process"].poll() is not None
                                     or not self._scan_job(camera_id, job)):
                                 self._stop_job(camera_id)
-                                self.retry_after[camera_id] = time.time() + 10
-                                self.errors[camera_id] = "SSD gần đầy, tạm dừng ghi." if not has_space else "Luồng ngắt, tự thử nối lại sau 10 giây."
+                                if camera_id in self.desired:
+                                    retry_seconds = self._schedule_retry(camera_id)
+                                    self.errors[camera_id] = ("SSD gần đầy, tạm dừng ghi." if not has_space
+                                                              else f"Luồng ngắt, tự thử nối lại sau {retry_seconds:g} giây.")
+                                else:
+                                    self.retry_after.pop(camera_id, None)
+                                    self.retry_failures.pop(camera_id, None)
+                                    self.errors.pop(camera_id, None)
                         if self.enabled and has_space:
                             for camera_id in self.desired:
                                 if camera_id not in self.jobs and time.time() >= self.retry_after.get(camera_id, 0):

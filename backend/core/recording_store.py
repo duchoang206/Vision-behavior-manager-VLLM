@@ -93,6 +93,17 @@ class RecordingStore:
             cursor.execute("SELECT * FROM archive.recordings WHERE status IN ('recording','deleting')")
             return [dict(row) for row in cursor.fetchall()]
 
+    def indexed_paths(self):
+        """Return paths already represented in the archive index.
+
+        Startup recovery uses this to avoid probing every historical recording
+        again. Deleted rows are included deliberately: if a deleted file is
+        unexpectedly left on disk, it must not be resurrected as new evidence.
+        """
+        with self.transaction() as cursor:
+            cursor.execute("SELECT path FROM archive.recordings")
+            return {row["path"] for row in cursor.fetchall()}
+
     def mark_deleting(self, record_id):
         with self.transaction() as cursor:
             cursor.execute("UPDATE archive.recordings SET status='deleting',updated_at=NOW() WHERE id=%s", (record_id,))
