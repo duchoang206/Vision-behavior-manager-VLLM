@@ -7,12 +7,46 @@ import sys
 import threading
 import time
 
-from core.model_track_masks import model_identity
+from core.model_track_masks import box_iou, model_identity
 from core.deepstream_native_mask import mask_from_object_meta
 from core.deepstream_geometry import clamp_normalized_polygon, normalize_stream_bbox, unletterbox_bbox
 
 
 PREFERRED_TRACK_MARGIN = 0.20
+ROBOT_MERGE_IOU = 0.5
+
+
+def merge_overlapping_robots(objects, previous_ids=None):
+    """One physical robot often shows up as several overlapping boxes of different robot classes (the model
+    splits its score between look-alike classes). Fold them into one box that keeps the evidence of all of
+    them, preferring the track id kept last frame so the id does not hop. previous_ids is updated in place."""
+    robots = [obj for obj in objects if str(obj.get("category", "")).lower() == "robot"]
+    if len(robots) < 2:
+        if previous_ids is not None:
+            previous_ids.clear()
+            previous_ids.update(obj.get("id") for obj in robots)
+        return objects
+    def confidence(obj):
+        try:
+            value = float(obj.get("confidence", 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return value if math.isfinite(value) else 0.0
+    ranked = sorted(robots, key=lambda obj: (obj.get("id") in (previous_ids or ()), confidence(obj)), reverse=True)
+    kept = []
+    for obj in ranked:
+        box = [float(obj.get(name, 0) or 0) for name in ("x", "y", "w", "h")]
+        host = next((other for other in kept
+                     if box_iou(box, [float(other.get(name, 0) or 0) for name in ("x", "y", "w", "h")]) >= ROBOT_MERGE_IOU), None)
+        if host is None:
+            kept.append(obj)
+        else:
+            host["confidence"] = min(.99, confidence(host) + .5 * confidence(obj))
+    if previous_ids is not None:
+        previous_ids.clear()
+        previous_ids.update(obj.get("id") for obj in kept)
+    kept_ids = {id(obj) for obj in kept}
+    return [obj for obj in objects if id(obj) in kept_ids or str(obj.get("category", "")).lower() != "robot"]
 DETECTOR_STALE_S = float(os.getenv("DETECTOR_STALE_MS", "500")) / 1000.0
 
 
@@ -100,6 +134,7 @@ def run(settings):
     metadata_coordinates = str(settings.get("metadata_coordinates", "stream")).lower()
     confidence_cache = {}
     class_preference = {}
+    robot_ids = {}
     output_lock = threading.Lock()
     from core.model_track_gate import ModelTrackGate
     from core.deepstream_pose import attach_poses_to_tracks, frame_poses
@@ -320,6 +355,7 @@ def run(settings):
                 if model_type == "pose" and objects:
                     poses = frame_poses(frame, stream_width, stream_height, network_width, network_height)
                     attach_poses_to_tracks(objects, poses)
+                objects = merge_overlapping_robots(objects, robot_ids.setdefault(camera_id, set()))
                 objects, rejected_by_class = limit_one_object_per_class(objects, class_preference.setdefault(camera_id, {}))
                 detector_candidates = [{"track_id": obj["local_id"], "class_name": obj["class"],
                                         "confidence": round(obj["confidence"], 4)} for obj in objects[:32]]

@@ -107,6 +107,10 @@ def _box_filters(box):
 DETECTOR_STALE_MS = float(os.getenv("DETECTOR_STALE_MS", "500"))
 
 
+CLASS_SCORE_DECAY = .92
+CLASS_SWITCH_RATIO = 1.4
+
+
 class ModelTrackGate:
     def __init__(self, confidence_thresholds=None, acquire_confidence=.50, retain_confidence=.30):
         self.confidence_thresholds = confidence_thresholds or {}
@@ -142,12 +146,38 @@ class ModelTrackGate:
 
         return self.retain_confidence if confirmed else self.acquire_confidence
 
+    @staticmethod
+    def _stabilize_class(previous, obj, now):
+        recent = previous is not None and now - previous["seen"] <= 300
+        scores = {key: (value[0] * CLASS_SCORE_DECAY, value[1]) for key, value in
+                  (previous.get("class_scores") or {}).items()} if recent else {}
+        try:
+            confidence = max(0.0, float(obj.get("confidence", 0) or 0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        identity = dict(**{name: obj.get(name) for name in ("class", "class_id", "label")})
+        key = obj.get("class_id", obj.get("class"))
+        scores[key] = (scores.get(key, (0.0, None))[0] + confidence, identity)
+        leader = previous.get("class_leader") if recent else None
+        best = max(scores, key=lambda candidate: scores[candidate][0])
+        if leader not in scores or scores[best][0] > scores[leader][0] * CLASS_SWITCH_RATIO:
+            leader = best
+        if leader != key:
+            obj = dict(obj, **scores[leader][1])
+        return obj, scores, leader
+
     def filter(self, camera_id, objects, now, verification_categories=()):
         output = []
         reasons = {}
         for obj in objects:
-            key = camera_id, track_key(obj)
+            is_robot = str(obj.get("category", "")).lower() == "robot"
+            # Robots look alike, so the detector flips between robot classes; key them by tracker id only so
+            # confirmation and smoothing survive a flip, and let accumulated class scores pick the label.
+            key = camera_id, ((obj.get("model_id"), obj["id"]) if is_robot else track_key(obj))
             previous = self.entries.get(key)
+            class_scores = class_leader = None
+            if is_robot:
+                obj, class_scores, class_leader = self._stabilize_class(previous, obj, now)
             box = bbox(obj)
             score = float(obj.get("confidence", 0))
             detected_at = float(obj.get("detected_at", 0))
@@ -187,7 +217,7 @@ class ModelTrackGate:
                 hits = ((previous["hits"] if continuous else 0) + 1) if score >= threshold else 0
                 candidate_hits = (previous.get("candidate_hits", 0) if continuous else 0) + 1
                 confirmed = hits >= 2 or confirmed
-                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now)
+                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, class_scores=class_scores, class_leader=class_leader, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now)
                 if confirmed and score >= threshold:
                     if smoothed:
                         obj_out = dict(obj,

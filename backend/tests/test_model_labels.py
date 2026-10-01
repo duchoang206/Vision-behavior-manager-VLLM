@@ -242,6 +242,20 @@ class ModelLabelGateTests(unittest.TestCase):
                                                  tracking_state="tracked", detected_at=now)], now)
         self.assertGreater((out[0]["x"] - last) * 1280, 40)  # followed >40 of the 115 px it moved
 
+    def test_robot_class_flips_keep_one_track_and_a_stable_label(self):
+        gate = ModelTrackGate()
+        labels = []
+        for frame in range(30):
+            now = 1000 + frame * 40
+            flipped = frame in (8, 9, 10, 17)
+            cls = "Robot_6868" if flipped else "Robot_2001"
+            out, _ = gate.filter("cam", [dict(tracked(7, category="robot", x=.4, y=.4, w=.1, h=.2, detected_at=now,
+                                                     confidence=.6, tracking_state="tracked"), **{"class": cls, "class_id": 3 if flipped else 2})], now)
+            if out:
+                labels.append(out[0]["class"])
+        self.assertGreater(len(labels), 25)  # the flips did not restart the confirmation
+        self.assertEqual({"Robot_2001"}, set(labels))
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])
