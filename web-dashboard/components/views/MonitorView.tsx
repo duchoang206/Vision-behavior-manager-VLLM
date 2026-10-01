@@ -184,6 +184,20 @@ const TRACK_FADE_START_MS = 350;
 const MODEL_BBOX_HOLD_MS = 600;
 // Velocity lead: compensates metadata staleness while an object moves.
 const MOTION_LEAD_MAX_MS = 120;
+const MOTION_LEAD_MAX_DISPLACEMENT = 0.08;
+// Constant lead for video/metadata pipeline latency. Tune live: localStorage.bboxLeadMs = '200' + reload.
+let cachedLeadBaseMs: number | null = null;
+const motionLeadBaseMs = () => {
+  if (cachedLeadBaseMs === null) {
+    let value = 120;
+    try {
+      const stored = Number(window.localStorage.getItem('bboxLeadMs'));
+      if (window.localStorage.getItem('bboxLeadMs') !== null && Number.isFinite(stored)) value = Math.min(500, Math.max(0, stored));
+    } catch { /* storage unavailable */ }
+    cachedLeadBaseMs = value;
+  }
+  return cachedLeadBaseMs;
+};
 const MOTION_LEAD_EXPIRE_MS = 250;
 
 const mergeRois = (existing: ROIState[] = [], incoming: ROIState[] = []) => {
@@ -364,9 +378,14 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
                 if (sinceMove > MOTION_LEAD_EXPIRE_MS) {
                   track.velX = 0; track.velY = 0;
                 } else {
-                  const lead = Math.min(Math.max(sinceMove, 0), MOTION_LEAD_MAX_MS);
+                  const lead = Math.min(Math.max(sinceMove, 0), MOTION_LEAD_MAX_MS) + motionLeadBaseMs();
                   leadX = (track.velX ?? 0) * lead;
                   leadY = (track.velY ?? 0) * lead;
+                  const leadLen = Math.hypot(leadX, leadY);
+                  if (leadLen > MOTION_LEAD_MAX_DISPLACEMENT) {
+                    leadX *= MOTION_LEAD_MAX_DISPLACEMENT / leadLen;
+                    leadY *= MOTION_LEAD_MAX_DISPLACEMENT / leadLen;
+                  }
                 }
               }
               const goalX = track.targetX + leadX;
@@ -1006,11 +1025,13 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                       if (!repeated) {
                         const dt = receivedAt - (track.velAt ?? track.lastUpdated);
                         if (dt > 5 && dt < 400) {
-                          const vx = (obj.x - track.targetX) / dt;
-                          const vy = (obj.y - track.targetY) / dt;
-                          const moving = Math.hypot(vx, vy) * 40 > 0.003;
-                          track.velX = moving ? (track.velX ?? 0) * 0.4 + vx * 0.6 : 0;
-                          track.velY = moving ? (track.velY ?? 0) * 0.4 + vy * 0.6 : 0;
+                          // Time-constant (80 ms) EMA so predicted/tracked frame alternation does not whip the estimate.
+                          const k = 1 - Math.exp(-dt / 80);
+                          const vx = (track.velX ?? 0) + k * ((obj.x - track.targetX) / dt - (track.velX ?? 0));
+                          const vy = (track.velY ?? 0) + k * ((obj.y - track.targetY) / dt - (track.velY ?? 0));
+                          const moving = Math.hypot(vx, vy) > 0.00001; // ~13 px/s
+                          track.velX = moving ? vx : 0;
+                          track.velY = moving ? vy : 0;
                         } else {
                           track.velX = 0; track.velY = 0;
                         }
