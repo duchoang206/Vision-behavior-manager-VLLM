@@ -6,7 +6,7 @@ import { useLanguage } from '../LanguageContext';
 import { useCameras, Camera } from '../CameraContext';
 import { useAppTheme } from '../ThemeContext';
 import { RegisteredMask, validRegisteredMask } from '../../lib/registered-mask';
-import { LiveRegisteredMask, isLiveRegisteredMask, metadataReceivedAt, updateLiveRegisteredMask } from '../../lib/live-registered-mask';
+import { LiveRegisteredMask, MODEL_MASK_MAX_AGE_MS, isLiveRegisteredMask, metadataReceivedAt, updateLiveRegisteredMask } from '../../lib/live-registered-mask';
 import { segmentationColors, segmentationPath } from '../../lib/segmentation-overlay';
 import { connectRealtimeSocket, createMetadataClock } from '../../lib/realtime-socket';
 import { connectRealtimeVideo } from '../../lib/realtime-video';
@@ -22,6 +22,7 @@ type TrackedObject = {
   model_id?: string;
   generation?: string;
   identity_verified?: boolean;
+  position_unverified?: boolean;
   label_prompt_id?: string;
   category?: string;
   local_id?: string | number;
@@ -83,6 +84,10 @@ type InterpolatedTrack = {
   targetY: number;
   targetW: number;
   targetH: number;
+  position_unverified?: boolean;
+  velX?: number;
+  velY?: number;
+  velAt?: number;
   floorX: number;
   floorY: number;
   lastUpdated: number;
@@ -175,6 +180,11 @@ const filterRealConfiguredRois = (rois: ROIState[]) =>
   rois.filter(roi => (roi.rule_type || '').toLowerCase() !== 'occupancy' || isStorageSlotRoi(roi));
 const TRACK_HOLD_MS = 1200;
 const TRACK_FADE_START_MS = 350;
+// Bridge brief detector gaps for bbox-only models so boxes do not blink off/on.
+const MODEL_BBOX_HOLD_MS = 600;
+// Velocity lead: compensates metadata staleness while an object moves.
+const MOTION_LEAD_MAX_MS = 120;
+const MOTION_LEAD_EXPIRE_MS = 250;
 
 const mergeRois = (existing: ROIState[] = [], incoming: ROIState[] = []) => {
   if (incoming.length === 0) return [];
@@ -347,7 +357,21 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               const rawClass = (track.class || 'Object').toLowerCase();
               const isRobot = rawClass.includes('robot');
 
-              const dist = Math.hypot(track.targetX - track.curX, track.targetY - track.curY);
+              let leadX = 0;
+              let leadY = 0;
+              if (track.velX || track.velY) {
+                const sinceMove = now - (track.velAt ?? now);
+                if (sinceMove > MOTION_LEAD_EXPIRE_MS) {
+                  track.velX = 0; track.velY = 0;
+                } else {
+                  const lead = Math.min(Math.max(sinceMove, 0), MOTION_LEAD_MAX_MS);
+                  leadX = (track.velX ?? 0) * lead;
+                  leadY = (track.velY ?? 0) * lead;
+                }
+              }
+              const goalX = track.targetX + leadX;
+              const goalY = track.targetY + leadY;
+              const dist = Math.hypot(goalX - track.curX, goalY - track.curY);
               const isRackObj = /rack|pallet|shelf|kệ/i.test(track.label || track.class || '');
               let alphaPos = 0.65;
               if (isRackObj && !track.carried_rack) {
@@ -368,10 +392,10 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               }
 
               const sizeDist = Math.hypot(track.targetW - track.curW, track.targetH - track.curH);
-              const alphaSize = sizeDist < 0.001 ? 1.0 : (sizeDist > 0.06 ? 0.20 : 0.12);
+              const alphaSize = sizeDist < 0.001 ? 1.0 : (sizeDist > 0.06 ? 0.35 : (track.velX || track.velY ? 0.30 : 0.12));
 
-              track.curX += (track.targetX - track.curX) * alphaPos;
-              track.curY += (track.targetY - track.curY) * alphaPos;
+              track.curX += (goalX - track.curX) * alphaPos;
+              track.curY += (goalY - track.curY) * alphaPos;
               track.curW += (track.targetW - track.curW) * alphaSize;
               track.curH += (track.targetH - track.curH) * alphaSize;
 
@@ -384,7 +408,9 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               const isPerson = rawClass.includes('person') || rawClass.includes('human') || rawClass.includes('worker');
               const isFallen = Boolean(track.fall_detected || track.posture === 'fallen' || track.alert);
               const hasCustomLabel = hasRegisteredLabel(track.label);
-              const mask = isLiveRegisteredMask(track.maskFrame, now)
+              // Draw the mask while it is reasonably fresh; the position-age gate used to flip
+              // mask->box->mask on every detector hiccup, which read as flicker.
+              const mask = track.maskFrame && now - track.maskFrame.receivedAt <= MODEL_MASK_MAX_AGE_MS
                 ? track.maskFrame.mask : null;
               const drawMask = Boolean(mask);
               if (!shouldShowTrackIdentity(track.class, track.model_id)) {
@@ -393,7 +419,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               const displayClass = isRobot ? 'robot' : (isRack ? 'rack' : rawClass);
               const label = hasCustomLabel ? track.label!
                 : `${displayClass} #${track.local_id ?? track.id}`;
-              const displayLabel = label;
+              const displayLabel = track.position_unverified ? `${label} · chưa xác thực vị trí` : label;
 
               const colors = segmentationColors(track.label || `${track.model_id}:${track.local_id ?? track.id}`, isFallen);
               const strokeColor = isPerson && !isFallen ? '#4ade80' : colors.stroke;
@@ -414,6 +440,10 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
                   path = segmentationPath(mask, videoDrawW, videoDrawH, videoOffsetX, videoOffsetY);
                   paths.set(mask, path);
                 }
+                // Slide the (older) mask polygon onto the smoothed/lead-compensated box so it
+                // tracks motion and stays attached to its label tag.
+                const maskBox = track.maskFrame!.box;
+                ctx.translate((track.curX - maskBox[0]) * videoDrawW, (track.curY - maskBox[1]) * videoDrawH);
                 ctx.fillStyle = fillColor;
                 ctx.fill(path, 'evenodd');
                 ctx.lineWidth = 3.25;
@@ -874,7 +904,8 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                   const replaced = track.model_id && track.label && streamObjects.some(obj => obj.id !== trackId
                     && obj.model_id === track.model_id && obj.identity_verified
                     && obj.label?.trim().toLowerCase() === track.label?.trim().toLowerCase());
-                  const expired = track.model_id ? !isLiveRegisteredMask(track.maskFrame, now)
+                  const expired = track.model_id
+                    ? !isLiveRegisteredMask(track.maskFrame, now) && now - track.lastUpdated > MODEL_BBOX_HOLD_MS
                     : !isRobotClass(track.class) || now - track.lastUpdated > TRACK_HOLD_MS;
                   if ((streamApplies && removed) || invalidated || (streamApplies && replaced) || (streamApplies && !incomingIds.has(trackId) && expired)) {
                     tracks.delete(trackId);
@@ -884,6 +915,18 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
                 streamObjects.forEach(obj => {
                   if (stream.monitor_hidden || revokedIds.has(obj.id)) return;
+                  if (obj.model_id && !tracks.has(obj.id)) {
+                    // Tracker re-issued the id for the same class (one box per class per camera):
+                    // hand the smoothed state over instead of popping a new box beside a fading old one.
+                    const stale = Array.from(tracks.entries()).find(([trackId, candidate]) =>
+                      !incomingIds.has(trackId) && candidate.model_id === obj.model_id
+                      && candidate.class === obj.class && now - candidate.lastUpdated <= MODEL_BBOX_HOLD_MS);
+                    if (stale) {
+                      tracks.delete(stale[0]);
+                      stale[1].id = obj.id;
+                      tracks.set(obj.id, stale[1]);
+                    }
+                  }
                   const previous = tracks.get(obj.id);
                   if (previous?.observedAt !== undefined && obj.observed_at !== undefined
                     && obj.observed_at < previous.observedAt) return;
@@ -940,6 +983,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                       fall_detected: obj.fall_detected,
                       world_position: obj.world_position,
                       spatial_valid: obj.spatial_valid,
+                      position_unverified: Boolean(obj.position_unverified),
                     });
                   } else {
                     const track = tracks.get(obj.id)!;
@@ -949,7 +993,9 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     track.model_id = obj.model_id;
                     track.generation = obj.generation || stream.generation;
                     track.labelPrompt = Boolean(obj.label_prompt_id);
-                    track.maskFrame = maskFrame;
+                    track.position_unverified = Boolean(obj.position_unverified);
+                    track.maskFrame = maskFrame ?? ((obj as { mask_revoked?: boolean }).mask_revoked || obj.identity_verified === false
+                      || /lost|removed|deleted/i.test(obj.tracking_state || '') ? null : track.maskFrame);
                     track.observedAt = obj.observed_at;
                     const rawDx = Math.abs(obj.x - track.targetX);
                     const rawDy = Math.abs(obj.y - track.targetY);
@@ -957,6 +1003,19 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     const rawDh = Math.abs(obj.h - track.targetH);
                     // Dead-zone: suppress raw detector sub-pixel jitter (< ~2.5px) when stationary
                     if (rawDx > 0.0020 || rawDy > 0.0020) {
+                      if (!repeated) {
+                        const dt = receivedAt - (track.velAt ?? track.lastUpdated);
+                        if (dt > 5 && dt < 400) {
+                          const vx = (obj.x - track.targetX) / dt;
+                          const vy = (obj.y - track.targetY) / dt;
+                          const moving = Math.hypot(vx, vy) * 40 > 0.003;
+                          track.velX = moving ? (track.velX ?? 0) * 0.4 + vx * 0.6 : 0;
+                          track.velY = moving ? (track.velY ?? 0) * 0.4 + vy * 0.6 : 0;
+                        } else {
+                          track.velX = 0; track.velY = 0;
+                        }
+                        track.velAt = receivedAt;
+                      }
                       track.targetX = obj.x; track.targetY = obj.y;
                     }
                     if (rawDw > 0.0030 || rawDh > 0.0030) {

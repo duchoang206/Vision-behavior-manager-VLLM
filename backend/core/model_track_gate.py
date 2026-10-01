@@ -2,6 +2,37 @@ import math
 
 from core.model_track_masks import bbox, compatible_boxes, track_key
 
+# One Euro filter (Casiez et al.): heavy smoothing while a box is nearly still, light smoothing
+# (low lag) while it moves. Class-agnostic: applied to the bbox of every model type.
+POSITION_MIN_CUTOFF_HZ = 1.5
+POSITION_BETA = 45.0
+SIZE_MIN_CUTOFF_HZ = 0.6
+SIZE_BETA = 10.0
+DERIVATIVE_CUTOFF_HZ = 1.0
+
+
+def _alpha(dt, cutoff):
+    return 1.0 / (1.0 + (1.0 / (2.0 * math.pi * cutoff)) / dt)
+
+
+class _OneEuro:
+    def __init__(self, value, min_cutoff, beta):
+        self.value, self.speed = value, 0.0
+        self.min_cutoff, self.beta = min_cutoff, beta
+
+    def __call__(self, raw, dt):
+        self.speed += _alpha(dt, DERIVATIVE_CUTOFF_HZ) * ((raw - self.value) / dt - self.speed)
+        cutoff = self.min_cutoff + self.beta * abs(self.speed)
+        self.value += _alpha(dt, cutoff) * (raw - self.value)
+        return self.value
+
+
+def _box_filters(box):
+    return dict(cx=_OneEuro(box[0] + box[2] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
+                cy=_OneEuro(box[1] + box[3] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
+                w=_OneEuro(box[2], SIZE_MIN_CUTOFF_HZ, SIZE_BETA),
+                h=_OneEuro(box[3], SIZE_MIN_CUTOFF_HZ, SIZE_BETA))
+
 
 class ModelTrackGate:
     def __init__(self, confidence_thresholds=None, acquire_confidence=.50, retain_confidence=.30):
@@ -62,49 +93,27 @@ class ModelTrackGate:
             elif score < threshold and not can_verify:
                 reason = "low_confidence"
             else:
-                category = str(obj.get("category", "")).lower()
-                raw_class = str(obj.get("class", "")).lower()
-                raw_label = str(obj.get("label", "")).lower()
-                is_robot = category == "robot" or "robot" in raw_class or "robot" in raw_label or raw_class.startswith("amr") or raw_class.startswith("agv")
-
-                if is_robot and continuous and previous and "smoothed_box" in previous:
-                    prev_sb = previous["smoothed_box"]
-                    prev_x, prev_y, prev_w, prev_h = prev_sb
-                    prev_cx = prev_x + prev_w / 2.0
-                    prev_cy = prev_y + prev_h / 2.0
-
-                    cx = box[0] + box[2] / 2.0
-                    cy = box[1] + box[3] / 2.0
-
-                    # 1. Center position: fast responsiveness (alpha=0.80)
-                    cx_smooth = prev_cx + 0.80 * (cx - prev_cx)
-                    cy_smooth = prev_cy + 0.80 * (cy - prev_cy)
-
-                    # 2. Width deadband (< 4% change treated as noise) & max 8% rate limit
-                    w_change_ratio = abs(box[2] - prev_w) / max(prev_w, 1e-4)
-                    target_w = prev_w if w_change_ratio < 0.04 else box[2]
-                    clamped_w = max(prev_w * 0.92, min(prev_w * 1.08, target_w))
-                    w_smooth = prev_w + 0.25 * (clamped_w - prev_w)
-
-                    # 3. Height deadband (< 4% change treated as noise) & max 8% rate limit
-                    h_change_ratio = abs(box[3] - prev_h) / max(prev_h, 1e-4)
-                    target_h = prev_h if h_change_ratio < 0.04 else box[3]
-                    clamped_h = max(prev_h * 0.92, min(prev_h * 1.08, target_h))
-                    h_smooth = prev_h + 0.25 * (clamped_h - prev_h)
-
-                    # Top-left reconstruction with [0, 1] clipping
-                    x_smooth = max(0.0, min(1.0 - w_smooth, cx_smooth - w_smooth / 2.0))
-                    y_smooth = max(0.0, min(1.0 - h_smooth, cy_smooth - h_smooth / 2.0))
-                    smoothed_box = [x_smooth, y_smooth, w_smooth, h_smooth]
+                smoothed = bool(continuous and previous and previous.get("filters"))
+                if smoothed:
+                    filters = previous["filters"]
+                    dt = min(0.5, max(0.005, (now - previous["seen"]) / 1000.0))
+                    cx = filters["cx"](box[0] + box[2] / 2.0, dt)
+                    cy = filters["cy"](box[1] + box[3] / 2.0, dt)
+                    # Spike guard: a detector size outlier may move the filtered size by <= 8% per frame.
+                    w_smooth = filters["w"](max(filters["w"].value * .92, min(filters["w"].value * 1.08, box[2])), dt)
+                    h_smooth = filters["h"](max(filters["h"].value * .92, min(filters["h"].value * 1.08, box[3])), dt)
+                    smoothed_box = [max(0.0, min(1.0 - w_smooth, cx - w_smooth / 2.0)),
+                                    max(0.0, min(1.0 - h_smooth, cy - h_smooth / 2.0)), w_smooth, h_smooth]
                 else:
-                    smoothed_box = [box[0], box[1], box[2], box[3]]
+                    filters = _box_filters(box)
+                    smoothed_box = list(box)
 
                 hits = ((previous["hits"] if continuous else 0) + 1) if score >= threshold else 0
                 candidate_hits = (previous.get("candidate_hits", 0) if continuous else 0) + 1
                 confirmed = hits >= 2 or confirmed
-                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now)
+                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now)
                 if confirmed and score >= threshold:
-                    if is_robot and continuous and previous and "smoothed_box" in previous:
+                    if smoothed:
                         obj_out = dict(obj,
                                        x=round(smoothed_box[0], 5),
                                        y=round(smoothed_box[1], 5),

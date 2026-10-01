@@ -133,6 +133,14 @@ class RobotSpatialIdentityTests(unittest.TestCase):
         self.assertEqual(["Person_1"], [obj["label"] for obj in filtered])
         self.assertEqual("Robot_2001", objects[0]["label"])
 
+    def test_keep_rejected_keeps_box_but_flags_it(self):
+        objects = [dict(label="Robot_2001", category="robot", x=.7, y=.2, w=.2, h=.3, observed_at=self.now * 1000)]
+        kept, rejected = self.gate.filter_objects("cam", objects, now=self.now, keep_rejected=True)
+        self.assertEqual(["Robot_2001"], rejected)
+        self.assertEqual(1, len(kept))
+        self.assertTrue(kept[0]["position_unverified"])
+        self.assertFalse(kept[0]["spatial_identity"]["accepted"])
+
 
 if __name__ == "__main__":
     unittest.main()

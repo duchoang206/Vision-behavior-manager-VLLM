@@ -33,6 +33,17 @@ class CameraClassLimitTests(unittest.TestCase):
         self.assertEqual(1, rejected)
         self.assertEqual([2], [obj["local_id"] for obj in selected])
 
+    def test_preferred_track_is_not_stolen_by_near_tied_rival(self):
+        objects = [dict(**{"class": "Robot_1"}, local_id="1", confidence=.60, w=.1, h=.1),
+                   dict(**{"class": "Robot_1"}, local_id="2", confidence=.70, w=.1, h=.1)]
+        preferred = {"robot_1": "1"}
+        selected, _ = limit_one_object_per_class(objects, preferred)
+        self.assertEqual(["1"], [obj["local_id"] for obj in selected])
+        objects[0]["confidence"] = .40
+        selected, _ = limit_one_object_per_class(objects, preferred)
+        self.assertEqual(["2"], [obj["local_id"] for obj in selected])
+        self.assertEqual({"robot_1": "2"}, preferred)
+
 
 if __name__ == "__main__":
     unittest.main()

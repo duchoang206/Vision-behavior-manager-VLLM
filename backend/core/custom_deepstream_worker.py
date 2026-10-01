@@ -12,8 +12,15 @@ from core.deepstream_native_mask import mask_from_object_meta
 from core.deepstream_geometry import clamp_normalized_polygon, normalize_stream_bbox, unletterbox_bbox
 
 
-def limit_one_object_per_class(objects):
-    """Keep the most confident object for each model label in one camera frame."""
+PREFERRED_TRACK_MARGIN = 0.20
+
+
+def limit_one_object_per_class(objects, preferred=None):
+    """Keep the most confident object for each model label in one camera frame.
+
+    preferred: per-camera {label: local_id} of the previous winner. A near-tied rival (within
+    PREFERRED_TRACK_MARGIN confidence) cannot steal the slot, so the displayed track id does not flip.
+    """
     best = {}
     for obj in objects:
         label = str(obj.get("class") or obj.get("label") or "").casefold()
@@ -41,6 +48,23 @@ def limit_one_object_per_class(objects):
             previous_area = -math.inf
         if previous is None or (score, area) > (previous_score, previous_area):
             best[label] = obj
+    if preferred is not None:
+        def _score(candidate):
+            try:
+                value = float(candidate.get("confidence", 0) or 0)
+            except (TypeError, ValueError):
+                return -math.inf
+            return value if math.isfinite(value) else -math.inf
+        for label, chosen in list(best.items()):
+            keep = preferred.get(label)
+            if keep is not None and str(chosen.get("local_id")) != keep:
+                for candidate in objects:
+                    candidate_label = str(candidate.get("class") or candidate.get("label") or "").casefold()
+                    if (candidate_label == label and str(candidate.get("local_id")) == keep
+                            and _score(candidate) >= _score(chosen) - PREFERRED_TRACK_MARGIN):
+                        best[label] = chosen = candidate
+                        break
+            preferred[label] = str(chosen.get("local_id"))
     selected = list(best.values())
     return selected, len(objects) - len(selected)
 
@@ -74,6 +98,7 @@ def run(settings):
     network_width, network_height = float(network_shape[-1]), float(network_shape[-2])
     metadata_coordinates = str(settings.get("metadata_coordinates", "stream")).lower()
     confidence_cache = {}
+    class_preference = {}
     output_lock = threading.Lock()
     from core.model_track_gate import ModelTrackGate
     from core.deepstream_pose import attach_poses_to_tracks, frame_poses
@@ -294,7 +319,7 @@ def run(settings):
                 if model_type == "pose" and objects:
                     poses = frame_poses(frame, stream_width, stream_height, network_width, network_height)
                     attach_poses_to_tracks(objects, poses)
-                objects, rejected_by_class = limit_one_object_per_class(objects)
+                objects, rejected_by_class = limit_one_object_per_class(objects, class_preference.setdefault(camera_id, {}))
                 detector_candidates = [{"track_id": obj["local_id"], "class_name": obj["class"],
                                         "confidence": round(obj["confidence"], 4)} for obj in objects[:32]]
                 objects, rejected = gate.filter(camera_id, objects, now * 1000)

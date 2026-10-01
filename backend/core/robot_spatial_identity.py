@@ -127,7 +127,8 @@ class RobotSpatialIdentity:
                 result["poses"][robot_id] = pose
         return result
 
-    def filter_objects(self, cam_id, objects, now=None):
+    def filter_objects(self, cam_id, objects, now=None, keep_rejected=False):
+        """keep_rejected: keep FMS-mismatched robots (flagged position_unverified) instead of dropping them."""
         now = time.time() if now is None else now
         contexts = {}
         accepted, rejected = [], []
@@ -151,6 +152,9 @@ class RobotSpatialIdentity:
             obj["fms_robot_id"] = int(robot_identity(obj))
             if verification["accepted"] is False:
                 rejected.append(obj["label"])
+                if keep_rejected:
+                    obj["position_unverified"] = True
+                    accepted.append(obj)
             else:
                 accepted.append(obj)
         return accepted, rejected

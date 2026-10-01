@@ -674,16 +674,17 @@ def broadcast_metadata_sync(payload: dict):
                     obj.setdefault("observed_at", payload.get("timestamp", int(now * 1000)))
                     if payload.get("source") == "custom_deepstream":
                         obj.setdefault("generation", st.get("generation"))
-                incoming, spatial_rejections = robot_spatial_identity.filter_objects(cam_key, incoming, now=now)
-                st["identity_rejected_labels"] = sorted(set(st.get("identity_rejected_labels", []) + spatial_rejections))
+                # Monitor keeps boxes whose FMS position disagrees (flagged position_unverified) instead of dropping them.
+                incoming, _ = robot_spatial_identity.filter_objects(cam_key, incoming, now=now, keep_rejected=True)
+                st.setdefault("identity_rejected_labels", [])
                 if registered_robots:
-                    online_robot_calibration.observe(cam_key, incoming, registered_robots, now=now)
+                    online_robot_calibration.observe(
+                        cam_key, [obj for obj in incoming if not obj.get("position_unverified")], registered_robots, now=now)
                 fusion_source = payload.get("source", "deepstream")
                 if fusion_source == "custom_deepstream" and st.get("model_id"):
                     fusion_source = f"custom_deepstream:{st['model_id']}"
                 merged = metadata_fusion.update(cam_key, fusion_source, incoming)
-                merged, merged_rejections = robot_spatial_identity.filter_objects(cam_key, merged, now=now)
-                st["identity_rejected_labels"] = sorted(set(st["identity_rejected_labels"] + merged_rejections))
+                merged, _ = robot_spatial_identity.filter_objects(cam_key, merged, now=now, keep_rejected=True)
                 for obj in merged:
                     ground = obj.get("ground_point") or [obj.get("x", 0) + obj.get("w", 0) / 2, obj.get("y", 0) + obj.get("h", 0)]
                     spatial = camera_calibrator.project_ground_point(cam_key, *ground)
