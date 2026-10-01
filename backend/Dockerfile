@@ -43,6 +43,10 @@ RUN g++ -std=c++17 -shared -fPIC -O2 \
     -I/opt/nvidia/deepstream/deepstream/sources/includes \
     -I/usr/local/cuda/include \
     /app/models_config/person_pose_parser.cpp -o /opt/visionmanager/libperson_pose_parser.so
+RUN g++ -std=c++17 -shared -fPIC -O2 \
+    -I/opt/nvidia/deepstream/deepstream/sources/includes \
+    -I/usr/local/cuda/include \
+    /app/models_config/yolo_seg_raw_parser.cpp -o /opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg_raw.so
 
 # Ensure pyds (Python bindings) is accessible
 ENV PYTHONPATH="/opt/nvidia/deepstream/deepstream/lib:${PYTHONPATH}"

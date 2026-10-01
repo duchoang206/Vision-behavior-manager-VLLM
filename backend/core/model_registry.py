@@ -32,6 +32,8 @@ class ModelRegistry(WorkflowStore):
         self.gpu_build_wait_started = 0.0
         self.parser = os.getenv("VISION_YOLO_PARSER", "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo.so")
         self.seg_parser = os.getenv("VISION_YOLO_SEG_PARSER", "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg.so")
+        # Plain Ultralytics YOLOv8/11-seg exports (raw output0 + protos) need their own decoder.
+        self.seg_raw_parser = os.getenv("VISION_YOLO_SEG_RAW_PARSER", "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg_raw.so")
         self.pose_parser = os.getenv("VISION_YOLO_POSE_PARSER", "/opt/visionmanager/libperson_pose_parser.so")
         self.trtexec = os.getenv("TRTEXEC_PATH", "/usr/src/tensorrt/bin/trtexec")
 
@@ -282,6 +284,8 @@ class ModelRegistry(WorkflowStore):
                     metadata = json.loads(output_file.read_text())
                     parser = {"segment": self.seg_parser, "pose": self.pose_parser}.get(
                         metadata.get("model_type"), self.parser)
+                    if metadata.get("model_type") == "segment" and str(metadata.get("contract", "")).startswith("yolo_raw_segment"):
+                        parser = self.seg_raw_parser
                     if not Path(self.trtexec).is_file() or not Path(parser).is_file():
                         raise ValueError("Container thiếu trtexec hoặc custom YOLO parser tương ứng với model.")
                     if shutil.disk_usage(self.root).free < row["size_bytes"] * 2 + 1024**3:

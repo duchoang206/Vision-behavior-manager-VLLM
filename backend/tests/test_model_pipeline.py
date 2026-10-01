@@ -78,6 +78,15 @@ class ModelContractTests(unittest.TestCase):
         self.assertIn('parse-bbox-func-name=NvDsInferParseYoloV8Pose', config)
         self.assertIn('output-tensor-meta=1', config)
 
+    def test_raw_segment_export_gets_the_raw_decoder_and_bilinear_scaling(self):
+        metadata = {"model_type": "segment", "contract": "yolo_raw_segment_v8_v11", "shape": [7, 3, 640, 640],
+                    "labels": ["a", "b"], "max_batch": 7, "target_batch": 7, "dynamic_batch": False}
+        config = infer_config("/models/seg", metadata, "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg_raw.so")
+        self.assertIn("parse-bbox-instance-mask-func-name=NvDsInferParseYoloSegRaw", config)
+        self.assertIn("scaling-filter=1", config)
+        stock = infer_config("/models/seg", dict(metadata, contract="deepstream_yolo_seg"), "/opt/visionmanager/libnvdsinfer_custom_impl_Yolo_seg.so")
+        self.assertIn("parse-bbox-instance-mask-func-name=NvDsInferParseYoloSeg\n", stock)
+
     def test_external_weights_rejected_without_reading(self):
         tensor = self.model.graph.node[0].attribute[0].t
         tensor.data_location = self.onnx.TensorProto.EXTERNAL

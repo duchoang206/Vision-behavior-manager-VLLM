@@ -108,6 +108,9 @@ def infer_config(directory, metadata, parser):
     batch_size = metadata.get("max_batch", 8) if metadata.get("dynamic_batch") else 1
     infer_interval = os.getenv("DEEPSTREAM_INFER_INTERVAL", "1")
     if task == "segment":
+        # Raw Ultralytics exports need the decoder that understands output0 [4+nc+32, anchors] + protos;
+        # the stock DeepStream-Yolo-Seg function only reads pre-processed [N, 6+mask] tensors.
+        seg_function = "NvDsInferParseYoloSegRaw" if str(metadata.get("contract", "")).startswith("yolo_raw_segment") else "NvDsInferParseYoloSeg"
         return f"""[property]
 gie-unique-id=1
 gpu-id=0
@@ -126,10 +129,13 @@ cluster-mode=4
 maintain-aspect-ratio=1
 symmetric-padding=1
 output-tensor-meta=0
-parse-bbox-instance-mask-func-name=NvDsInferParseYoloSeg
+parse-bbox-instance-mask-func-name={seg_function}
 custom-lib-path={parser}
 output-instance-mask=1
 segmentation-threshold=0.5
+# DeepStream's default scaler samples like nearest-neighbour when shrinking the frame to the network size, which
+# erases thin objects (a rack scored 0.69 with bilinear but 0.04 with the default).
+scaling-filter=1
 
 [class-attrs-all]
 pre-cluster-threshold=0.25
