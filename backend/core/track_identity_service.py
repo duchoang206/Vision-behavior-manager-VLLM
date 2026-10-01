@@ -17,11 +17,12 @@ STORE_PATH = os.getenv("TRACK_REID_STORE", "/app/data/track_identity/prototypes.
 
 
 class TrackIdentityService:
-    def __init__(self, voter=None, reader_factory=None, encoder=encode_crop, sample_interval=.4, max_crops_per_cycle=6):
+    def __init__(self, voter=None, reader_factory=None, encoder=encode_crop, sample_interval=.4, max_crops_per_cycle=6, stable_interval=1.5):
         self.voter = voter or TrackIdentityVoter(store_path=STORE_PATH)
         self.reader_factory = reader_factory or self._default_reader
         self.encoder = encoder
         self.sample_interval, self.max_crops_per_cycle = sample_interval, max_crops_per_cycle
+        self.stable_interval = float(os.getenv("TRACK_REID_STABLE_INTERVAL", stable_interval))  # CPU: ~65 ms per crop
         self.pending, self.readers, self.last_sample, self.last_save = {}, {}, {}, time.time()
         self.lock = threading.Lock()
         self.wake = threading.Event()
@@ -91,7 +92,8 @@ class TrackIdentityService:
         for obj in robots:
             key = (cam_id, obj.get("id"))
             now = time.time()
-            if now - self.last_sample.get(key, 0) < self.sample_interval or crops >= self.max_crops_per_cycle:
+            interval = self.stable_interval if self.voter.settled(key) else self.sample_interval
+            if now - self.last_sample.get(key, 0) < interval or crops >= self.max_crops_per_cycle:
                 continue
             if obj.get("tracking_state") != "tracked" or float(obj.get("confidence", 0) or 0) < .5:
                 continue

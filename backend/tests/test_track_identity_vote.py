@@ -57,6 +57,15 @@ class TrackIdentityVoteTests(unittest.TestCase):
             voter.observe(("cam", 8), "Robot_1", appearance(1), now=index)
         self.assertIsNone(voter.decision(("cam", 8)))
 
+    def test_settled_only_after_a_full_unanimous_window(self):
+        voter = voter_with_two_robots()
+        key = ("cam", 11)
+        for index in range(14):
+            voter.observe(key, "Robot_2001", appearance(1), now=index)
+        self.assertFalse(voter.settled(key))
+        voter.observe(key, "Robot_2001", appearance(1), now=15)
+        self.assertTrue(voter.settled(key))
+
     def test_needs_two_registered_robots(self):
         voter = TrackIdentityVoter(store_path=None)
         voter.add_prototype("Robot_2001", appearance(1))

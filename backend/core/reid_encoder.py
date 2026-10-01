@@ -35,7 +35,12 @@ def _get_session():
             p for p in ("CUDAExecutionProvider", "CPUExecutionProvider")
             if p in available
         ] or ["CPUExecutionProvider"]
-        _session = ort.InferenceSession(model_path, providers=providers)
+        options = ort.SessionOptions()
+        # Default ORT uses every core and spin-waits between ops; with the per-track ReID vote that pegged ~18 cores.
+        options.intra_op_num_threads = int(os.getenv("REID_ORT_THREADS", "2"))
+        options.inter_op_num_threads = 1
+        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        _session = ort.InferenceSession(model_path, sess_options=options, providers=providers)
         print(f"[ReID] Crop encoder ready: {model_path} ({providers[0]})", flush=True)
         return _session
 

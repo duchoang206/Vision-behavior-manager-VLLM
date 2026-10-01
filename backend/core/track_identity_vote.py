@@ -110,6 +110,14 @@ class TrackIdentityVoter:
                              tally=dict(Counter(vote[0] for vote in state["votes"])))
                         for key, state in self.tracks.items()])
 
+    def settled(self, key, agreement=.9):
+        """True once a full window of votes agrees (>= agreement): the track needs far fewer samples after that."""
+        with self.lock:
+            state = self.tracks.get(key)
+            if not state or len(state["votes"]) < self.window:
+                return False
+            return Counter(vote[0] for vote in state["votes"]).most_common(1)[0][1] / len(state["votes"]) >= agreement
+
     def decision(self, key):
         with self.lock:
             state = self.tracks.get(key)
