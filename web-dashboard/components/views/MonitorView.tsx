@@ -392,7 +392,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
               }
 
               const sizeDist = Math.hypot(track.targetW - track.curW, track.targetH - track.curH);
-              const alphaSize = sizeDist < 0.001 ? 1.0 : (sizeDist > 0.06 ? 0.35 : (track.velX || track.velY ? 0.30 : 0.12));
+              const alphaSize = sizeDist < 0.0003 ? 1.0 : (sizeDist > 0.06 ? 0.5 : 0.3);
 
               track.curX += (goalX - track.curX) * alphaPos;
               track.curY += (goalY - track.curY) * alphaPos;
@@ -999,10 +999,10 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     track.observedAt = obj.observed_at;
                     const rawDx = Math.abs(obj.x - track.targetX);
                     const rawDy = Math.abs(obj.y - track.targetY);
-                    const rawDw = Math.abs(obj.w - track.targetW);
-                    const rawDh = Math.abs(obj.h - track.targetH);
-                    // Dead-zone: suppress raw detector sub-pixel jitter (< ~2.5px) when stationary
-                    if (rawDx > 0.0020 || rawDy > 0.0020) {
+                    // The backend gate already low-passes the box (One Euro). Frontend dead-zones and
+                    // slew limits on top of that turned smooth drift into visible stair-steps, so the
+                    // target follows the packet directly (only a sub-pixel dead-zone for position).
+                    if (rawDx > 0.0006 || rawDy > 0.0006) {
                       if (!repeated) {
                         const dt = receivedAt - (track.velAt ?? track.lastUpdated);
                         if (dt > 5 && dt < 400) {
@@ -1018,26 +1018,12 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                       }
                       track.targetX = obj.x; track.targetY = obj.y;
                     }
-                    if (rawDw > 0.0030 || rawDh > 0.0030) {
-                      const isRackTrack = /rack|pallet|shelf|kệ/i.test(obj.label || obj.class || '');
-                      if (isRackTrack && !obj.carried_rack) {
-                        // Stored racks on floor: full height includes legs touching ground.
-                        // Filter out transient detector flicker that clips legs (Mode B)
-                        if (obj.h < track.targetH * 0.88 && rawDx < 0.015) {
-                          // Retain confirmed height touching ground
-                        } else {
-                          const maxStepW = Math.max(0.012, track.targetW * 0.15);
-                          const maxStepH = Math.max(0.012, track.targetH * 0.15);
-                          track.targetW = Math.max(track.targetW - maxStepW, Math.min(track.targetW + maxStepW, obj.w));
-                          track.targetH = Math.max(track.targetH - maxStepH, Math.min(track.targetH + maxStepH, obj.h));
-                        }
-                      } else {
-                        // Slew-rate limiter on dimensions: physical objects don't jump > 15% in a single packet!
-                        const maxStepW = Math.max(0.012, track.targetW * 0.15);
-                        const maxStepH = Math.max(0.012, track.targetH * 0.15);
-                        track.targetW = Math.max(track.targetW - maxStepW, Math.min(track.targetW + maxStepW, obj.w));
-                        track.targetH = Math.max(track.targetH - maxStepH, Math.min(track.targetH + maxStepH, obj.h));
-                      }
+                    const isRackTrack = /rack|pallet|shelf|kệ/i.test(obj.label || obj.class || '');
+                    if (isRackTrack && !obj.carried_rack && obj.h < track.targetH * 0.88 && rawDx < 0.015) {
+                      // Stored racks: keep the confirmed height touching the ground (legs clipped for a frame).
+                      track.targetW = obj.w;
+                    } else {
+                      track.targetW = obj.w; track.targetH = obj.h;
                     }
                     track.floorX = fx; track.floorY = fy;
                     track.lastUpdated = receivedAt;
