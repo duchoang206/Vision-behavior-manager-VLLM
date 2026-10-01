@@ -3,7 +3,7 @@ import os
 import statistics
 from collections import deque
 
-from core.model_track_masks import bbox, compatible_boxes, track_key
+from core.model_track_masks import box_iou, bbox, compatible_boxes, track_key
 
 # One Euro filter (Casiez et al.): heavy smoothing while a box is nearly still, light smoothing
 # (low lag) while it moves. Class-agnostic: applied to the bbox of every model type.
@@ -111,6 +111,11 @@ CLASS_SCORE_DECAY = .92
 CLASS_SWITCH_RATIO = 1.4
 
 
+# A confirmed track missing from the tracker output (shadow tracking, a low-confidence frame) is carried on its
+# last velocity for up to this long, so a one-frame hole never shows up as a blink on the Monitor.
+BRIDGE_MS = float(os.getenv("TRACK_BRIDGE_MS", "400"))
+
+
 class ModelTrackGate:
     def __init__(self, confidence_thresholds=None, acquire_confidence=.50, retain_confidence=.30):
         self.confidence_thresholds = confidence_thresholds or {}
@@ -146,6 +151,26 @@ class ModelTrackGate:
 
         return self.retain_confidence if confirmed else self.acquire_confidence
 
+    def _bridge(self, camera_id, now, output, emitted):
+        bridged = []
+        for key, entry in self.entries.items():
+            if key[0] != camera_id or key in emitted or not entry.get("confirmed") or not entry.get("last_out"):
+                continue
+            elapsed = now - entry["out_at"]
+            if not 0 < elapsed <= BRIDGE_MS:
+                continue
+            last, motion = entry["last_out"], entry["filters"]["motion"]
+            width, height = float(last["w"]), float(last["h"])
+            x = max(0.0, min(1.0 - width, float(last["x"]) + motion["vx"] * elapsed * .9))
+            y = max(0.0, min(1.0 - height, float(last["y"]) + motion["vy"] * elapsed * .9))
+            box = [x, y, width, height]
+            if any(box_iou(box, bbox(other)) >= .4 for other in output + bridged
+                   if other.get("category") == last.get("category")):
+                continue  # the tracker already re-issued this robot under another id
+            bridged.append(dict(last, x=round(x, 5), y=round(y, 5), tracking_state="predicted", bridged=True,
+                                observed_at=now))
+        return bridged
+
     @staticmethod
     def _stabilize_class(previous, obj, now):
         recent = previous is not None and now - previous["seen"] <= 300
@@ -169,6 +194,7 @@ class ModelTrackGate:
     def filter(self, camera_id, objects, now, verification_categories=()):
         output = []
         reasons = {}
+        emitted = set()
         for obj in objects:
             is_robot = str(obj.get("category", "")).lower() == "robot"
             # Robots look alike, so the detector flips between robot classes; key them by tracker id only so
@@ -217,7 +243,8 @@ class ModelTrackGate:
                 hits = ((previous["hits"] if continuous else 0) + 1) if score >= threshold else 0
                 candidate_hits = (previous.get("candidate_hits", 0) if continuous else 0) + 1
                 confirmed = hits >= 2 or confirmed
-                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, class_scores=class_scores, class_leader=class_leader, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now)
+                self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, class_scores=class_scores, class_leader=class_leader, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now,
+                                         last_out=(previous or {}).get("last_out"), out_at=(previous or {}).get("out_at"))
                 if confirmed and score >= threshold:
                     if smoothed:
                         obj_out = dict(obj,
@@ -228,11 +255,14 @@ class ModelTrackGate:
                     else:
                         obj_out = obj
                     output.append(obj_out)
+                    emitted.add(key)
+                    self.entries[key]["last_out"], self.entries[key]["out_at"] = obj_out, now
                 elif can_verify and candidate_hits >= 2:
                     output.append(dict(obj, requires_label_verification=True))
                 else:
                     reason = "confirming_track"
             if reason:
                 reasons[reason] = reasons.get(reason, 0) + 1
+        output.extend(self._bridge(camera_id, now, output, emitted))
         self.entries = {key: entry for key, entry in self.entries.items() if now - entry["seen"] <= 700}
         return output, reasons

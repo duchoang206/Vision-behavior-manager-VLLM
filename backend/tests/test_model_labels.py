@@ -256,6 +256,41 @@ class ModelLabelGateTests(unittest.TestCase):
         self.assertGreater(len(labels), 25)  # the flips did not restart the confirmation
         self.assertEqual({"Robot_2001"}, set(labels))
 
+    def test_confirmed_track_is_bridged_through_short_tracker_holes(self):
+        gate = ModelTrackGate()
+        xs = []
+        for frame in range(40):
+            now = 1000 + frame * 40
+            present = not (20 <= frame < 24)
+            objects = [tracked(7, category="robot", x=.2 + frame * .004, y=.4, w=.1, h=.2, detected_at=now,
+                               confidence=.9, tracking_state="tracked")] if present else []
+            out, _ = gate.filter("cam", objects, now)
+            xs.append(out[0] if out else None)
+        self.assertTrue(all(item is not None for item in xs[3:]))  # no blink through the 4-frame hole
+        hole = xs[20:24]
+        self.assertTrue(all(item.get("bridged") for item in hole))
+        self.assertTrue(all(b["x"] > a["x"] for a, b in zip(hole, hole[1:])))  # keeps moving
+        self.assertFalse(xs[30].get("bridged"))
+
+    def test_bridge_expires_and_never_duplicates_a_reissued_track(self):
+        gate = ModelTrackGate()
+        for frame in range(6):
+            now = 1000 + frame * 40
+            gate.filter("cam", [tracked(7, category="robot", x=.3, y=.4, w=.1, h=.2, detected_at=now,
+                                        confidence=.9, tracking_state="tracked")], now)
+        out, _ = gate.filter("cam", [], 1000 + 6 * 40 + 500)
+        self.assertEqual([], out)  # 500 ms gap: beyond BRIDGE_MS
+        gate = ModelTrackGate()
+        for frame in range(6):
+            now = 1000 + frame * 40
+            gate.filter("cam", [tracked(7, category="robot", x=.3, y=.4, w=.1, h=.2, detected_at=now,
+                                        confidence=.9, tracking_state="tracked")], now)
+        for frame in range(6, 9):
+            now = 1000 + frame * 40
+            out, _ = gate.filter("cam", [tracked(8, category="robot", x=.3, y=.4, w=.1, h=.2, detected_at=now,
+                                                 confidence=.9, tracking_state="tracked")], now)
+        self.assertEqual([8], [obj["id"] for obj in out])  # old id's bridge is dropped once id 8 is confirmed
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])
