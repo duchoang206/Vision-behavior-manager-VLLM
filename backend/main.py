@@ -28,6 +28,9 @@ from core.person_tracker import person_tracker_manager
 from core.template_identity_tracker import template_identity_tracker_manager
 from core.identity_utils import identity_global_id, robot_number_from_label
 from core.robot_spatial_identity import robot_spatial_identity
+from core.track_identity_service import TrackIdentityService
+
+track_identity = TrackIdentityService()
 from core.registered_identity_metrics import registered_identity_metrics
 from core.metadata_fusion import MetadataFusion
 from core.metadata_broadcaster import LatestMetadataBroadcaster, close_metadata_socket
@@ -674,6 +677,8 @@ def broadcast_metadata_sync(payload: dict):
                     obj.setdefault("observed_at", payload.get("timestamp", int(now * 1000)))
                     if payload.get("source") == "custom_deepstream":
                         obj.setdefault("generation", st.get("generation"))
+                if payload.get("source") == "custom_deepstream":
+                    track_identity.apply(cam_key, incoming)  # per-track ReID vote corrects wrong detector labels
                 # Monitor keeps boxes whose FMS position disagrees (flagged position_unverified) instead of dropping them.
                 incoming, _ = robot_spatial_identity.filter_objects(cam_key, incoming, now=now, keep_rejected=True)
                 st.setdefault("identity_rejected_labels", [])
@@ -684,7 +689,11 @@ def broadcast_metadata_sync(payload: dict):
                 if fusion_source == "custom_deepstream" and st.get("model_id"):
                     fusion_source = f"custom_deepstream:{st['model_id']}"
                 merged = metadata_fusion.update(cam_key, fusion_source, incoming)
+                if payload.get("source") == "custom_deepstream":
+                    track_identity.apply(cam_key, merged)  # fusion resets labels to the detector class
                 merged, _ = robot_spatial_identity.filter_objects(cam_key, merged, now=now, keep_rejected=True)
+                if payload.get("source") == "custom_deepstream":
+                    track_identity.submit(cam_key, merged)
                 for obj in merged:
                     ground = obj.get("ground_point") or [obj.get("x", 0) + obj.get("w", 0) / 2, obj.get("y", 0) + obj.get("h", 0)]
                     spatial = camera_calibrator.project_ground_point(cam_key, *ground)
@@ -1799,6 +1808,11 @@ async def get_digital_twin_telemetry():
 async def websocket_fms_endpoint(websocket: WebSocket):
     """WebSocket endpoint streaming 10Hz robot fleet telemetry from FMS"""
     await fms_bridge.handle_websocket(websocket)
+
+@app.get("/api/track_identity/status")
+async def get_track_identity_status():
+    """Per-track ReID vote tallies and the robot appearance gallery size."""
+    return dict(enabled=track_identity.enabled, **track_identity.voter.status())
 
 @app.get("/api/fms/status")
 async def get_fms_status():
