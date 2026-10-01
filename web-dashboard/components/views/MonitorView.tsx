@@ -185,14 +185,16 @@ const MODEL_BBOX_HOLD_MS = 600;
 // Velocity lead: compensates metadata staleness while an object moves.
 const MOTION_LEAD_MAX_MS = 120;
 const MOTION_LEAD_MAX_DISPLACEMENT = 0.08;
-// Constant lead for video/metadata pipeline latency. Tune live: localStorage.bboxLeadMs = '200' + reload.
+// Constant lead (ms) vs the metadata clock. Measured in-browser: metadata arrives ~40-60 ms BEFORE the matching
+// video frame is shown, so the box is delayed slightly (negative lead) instead of pushed ahead.
+// Tune live: localStorage.bboxLeadMs = '-50' + reload.
 let cachedLeadBaseMs: number | null = null;
 const motionLeadBaseMs = () => {
   if (cachedLeadBaseMs === null) {
-    let value = 120;
+    let value = -50;
     try {
       const stored = Number(window.localStorage.getItem('bboxLeadMs'));
-      if (window.localStorage.getItem('bboxLeadMs') !== null && Number.isFinite(stored)) value = Math.min(500, Math.max(0, stored));
+      if (window.localStorage.getItem('bboxLeadMs') !== null && Number.isFinite(stored)) value = Math.min(500, Math.max(-300, stored));
     } catch { /* storage unavailable */ }
     cachedLeadBaseMs = value;
   }
