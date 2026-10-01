@@ -50,7 +50,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - DISABLE_DEEPSTREAM_GST=0
       - DISABLE_CUSTOM_DETECTOR=0
-      - DEEPSTREAM_INFER_INTERVAL=1
+      - DEEPSTREAM_INFER_INTERVAL=0
       # The bundled yolo11l-pose sample is not an active detector. Inference
       # begins only when an uploaded model is Ready and deployed from the UI.
       - ENABLE_LEGACY_DEEPSTREAM_PIPELINE=0
