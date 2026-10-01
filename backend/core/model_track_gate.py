@@ -27,8 +27,41 @@ class _OneEuro:
         return self.value
 
 
+PREDICTED_FRAME_WEIGHT = .10
+VELOCITY_TAU_MS = 100.0
+VELOCITY_MAX_GAP_MS = 600.0
+COAST_DECAY_TAU_MS = 800.0
+
+
+def _coast_center(motion, cx, cy, tracked, now, dt):
+    """DeepStream alternates detector ("tracked") and Kalman ("predicted") frames, and predicted frames
+    under-move, so raw motion arrives as ~12 Hz bursts. Keep a velocity from detector frames and let
+    predicted frames coast on it instead of trusting their lagging position."""
+    if tracked:
+        t_at = motion["t_at"]
+        if t_at is not None and 0 < now - t_at <= VELOCITY_MAX_GAP_MS:
+            elapsed = now - t_at
+            k = 1.0 - math.exp(-elapsed / VELOCITY_TAU_MS)
+            motion["vx"] += k * ((cx - motion["t_cx"]) / elapsed - motion["vx"])
+            motion["vy"] += k * ((cy - motion["t_cy"]) / elapsed - motion["vy"])
+        else:
+            motion["vx"] = motion["vy"] = 0.0
+        motion["t_at"], motion["t_cx"], motion["t_cy"] = now, cx, cy
+        motion["cx"], motion["cy"] = cx, cy
+    else:
+        step = dt * 1000.0
+        decay = math.exp(-step / COAST_DECAY_TAU_MS)
+        motion["vx"] *= decay
+        motion["vy"] *= decay
+        est_x, est_y = motion["cx"] + motion["vx"] * step, motion["cy"] + motion["vy"] * step
+        motion["cx"] = PREDICTED_FRAME_WEIGHT * cx + (1 - PREDICTED_FRAME_WEIGHT) * est_x
+        motion["cy"] = PREDICTED_FRAME_WEIGHT * cy + (1 - PREDICTED_FRAME_WEIGHT) * est_y
+    return motion["cx"], motion["cy"]
+
+
 def _box_filters(box):
-    return dict(cx=_OneEuro(box[0] + box[2] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
+    return dict(motion=dict(cx=box[0] + box[2] / 2.0, cy=box[1] + box[3] / 2.0, vx=0.0, vy=0.0, t_at=None, t_cx=0.0, t_cy=0.0),
+                cx=_OneEuro(box[0] + box[2] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 cy=_OneEuro(box[1] + box[3] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 w=_OneEuro(box[2], SIZE_MIN_CUTOFF_HZ, SIZE_BETA),
                 h=_OneEuro(box[3], SIZE_MIN_CUTOFF_HZ, SIZE_BETA))
@@ -97,8 +130,10 @@ class ModelTrackGate:
                 if smoothed:
                     filters = previous["filters"]
                     dt = min(0.5, max(0.005, (now - previous["seen"]) / 1000.0))
-                    cx = filters["cx"](box[0] + box[2] / 2.0, dt)
-                    cy = filters["cy"](box[1] + box[3] / 2.0, dt)
+                    cx_raw, cy_raw = _coast_center(filters["motion"], box[0] + box[2] / 2.0, box[1] + box[3] / 2.0,
+                                                   str(obj.get("tracking_state", "")).lower() != "predicted", now, dt)
+                    cx = filters["cx"](cx_raw, dt)
+                    cy = filters["cy"](cy_raw, dt)
                     # Spike guard: a detector size outlier may move the filtered size by <= 8% per frame.
                     w_smooth = filters["w"](max(filters["w"].value * .92, min(filters["w"].value * 1.08, box[2])), dt)
                     h_smooth = filters["h"](max(filters["h"].value * .92, min(filters["h"].value * 1.08, box[3])), dt)

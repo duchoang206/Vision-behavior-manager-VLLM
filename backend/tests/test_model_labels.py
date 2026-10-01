@@ -202,6 +202,23 @@ class ModelLabelGateTests(unittest.TestCase):
             lag = true_x - out[0]["x"]
         self.assertLess(lag, .03)
 
+    def test_predicted_frames_coast_instead_of_pulsing(self):
+        gate = ModelTrackGate()
+        xs = []
+        for frame in range(80):
+            now = 1000 + frame * 40
+            true_x = .1 + frame * .004
+            detected = frame % 2 == 0
+            # predicted frames under-move: they sit at the previous detection plus a fraction of the motion
+            raw_x = true_x if detected else true_x - .004 * .9
+            out, _ = gate.filter("cam", [tracked(category="robot", x=raw_x, tracking_state="tracked" if detected else "predicted",
+                                                 detected_at=now)], now)
+            if out:
+                xs.append(out[0]["x"])
+        steps = [b - a for a, b in zip(xs[40:], xs[41:])]
+        self.assertGreater(min(steps), 0)
+        self.assertLess(max(steps) / min(steps), 1.8)
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])
