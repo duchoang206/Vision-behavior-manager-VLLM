@@ -291,6 +291,34 @@ class ModelLabelGateTests(unittest.TestCase):
                                                  confidence=.9, tracking_state="tracked")], now)
         self.assertEqual([8], [obj["id"] for obj in out])  # old id's bridge is dropped once id 8 is confirmed
 
+    def test_new_track_converges_on_its_real_size_and_a_size_change_never_pops(self):
+        gate = ModelTrackGate()
+        heights = []
+        for frame in range(40):
+            now = 1000 + frame * 40
+            h = min(.12, .06 + frame * .008)  # a fresh track's first boxes are small, then reach the real size
+            out, _ = gate.filter("cam", [tracked(9, category="robot", x=.4, y=.4, w=.05, h=h, detected_at=now,
+                                                 confidence=.9, tracking_state="tracked")], now)
+            if out:
+                heights.append(out[0]["h"])
+        self.assertGreater(heights[-1], .115)  # converged on the real size
+        steps = [abs(b - a) / a for a, b in zip(heights, heights[1:])]
+        self.assertLess(max(steps), .25)  # no frame-to-frame pop (the lock used to snap to the raw median)
+
+    def test_size_change_while_parked_is_followed_smoothly_not_snapped(self):
+        gate = ModelTrackGate()
+        heights = []
+        for frame in range(60):
+            now = 1000 + frame * 40
+            h = .10 if frame < 20 else .125
+            out, _ = gate.filter("cam", [tracked(10, category="robot", x=.4, y=.4, w=.05, h=h, detected_at=now,
+                                                 confidence=.9, tracking_state="tracked")], now)
+            if out:
+                heights.append(out[0]["h"])
+        steps = [abs(b - a) / a for a, b in zip(heights, heights[1:])]
+        self.assertLess(max(steps), .03)
+        self.assertGreater(heights[-1], .12)
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])

@@ -11,6 +11,10 @@ POSITION_MIN_CUTOFF_HZ = 1.5
 POSITION_BETA = 45.0
 SIZE_MIN_CUTOFF_HZ = 0.6
 SIZE_BETA = 10.0
+SIZE_MEDIAN_WINDOW = 5
+WARMUP_FRAMES = 10  # a freshly shown track converges on its real size quickly instead of growing from its first box
+WARMUP_BOOST = 3.0
+SMALL_BOX_HEIGHT = .25  # boxes shorter than this (normalised) get proportionally stronger size smoothing
 DERIVATIVE_CUTOFF_HZ = 1.0
 
 
@@ -70,7 +74,9 @@ STILL_SIZE_RATIO = .05
 
 class _StationaryLock:
     """Detector noise keeps a parked robot's box breathing by a few pixels. While the raw box stays inside a
-    tiny envelope for ~0.4 s, output its median instead; any real movement leaves the envelope and unlocks."""
+    tiny envelope for ~0.4 s the output is held (a dead-band around the held value); it only follows the
+    low-pass filtered value once that has really moved. It never snaps to the raw box, so a size change that
+    the filter is still absorbing cannot pop out when the lock re-engages."""
 
     def __init__(self):
         self.samples = deque(maxlen=STILL_WINDOW)
@@ -79,24 +85,29 @@ class _StationaryLock:
 
     def __call__(self, cx, cy, w, h, filtered):
         self.samples.append((cx, cy, w, h))
-        locked, target = False, filtered
+        if self.out is None:
+            self.out = tuple(filtered)
+        locked = False
         if len(self.samples) >= STILL_MIN_SAMPLES:
             columns = list(zip(*self.samples))
             spread = [max(column) - min(column) for column in columns]
-            median = [statistics.median(column) for column in columns]
-            if (spread[0] < STILL_CENTER_PX / 1280 and spread[1] < STILL_CENTER_PX / 720
-                    and spread[2] < STILL_SIZE_RATIO * median[2] and spread[3] < STILL_SIZE_RATIO * median[3]):
-                locked, target = True, tuple(median)
-        if self.out is None or not (locked or self.locked):
-            self.out = target
-        else:  # ease into / out of the lock so it never snaps
-            self.out = tuple(o + .5 * (t - o) for o, t in zip(self.out, target))
+            median_w, median_h = statistics.median(columns[2]), statistics.median(columns[3])
+            locked = (spread[0] < STILL_CENTER_PX / 1280 and spread[1] < STILL_CENTER_PX / 720
+                      and spread[2] < STILL_SIZE_RATIO * median_w and spread[3] < STILL_SIZE_RATIO * median_h)
+        if locked:
+            dead = (STILL_CENTER_PX / 2 / 1280, STILL_CENTER_PX / 2 / 720, STILL_SIZE_RATIO / 2 * self.out[2],
+                    STILL_SIZE_RATIO / 2 * self.out[3])
+            self.out = tuple(o if abs(f - o) <= d else o + .35 * (f - o) for o, f, d in zip(self.out, filtered, dead))
+        elif self.locked:  # leaving the lock: ease towards the filtered value instead of jumping
+            self.out = tuple(o + .5 * (f - o) for o, f in zip(self.out, filtered))
+        else:
+            self.out = tuple(filtered)
         self.locked = locked
         return self.out
 
 
 def _box_filters(box):
-    return dict(lock=_StationaryLock(), motion=dict(cx=box[0] + box[2] / 2.0, cy=box[1] + box[3] / 2.0, vx=0.0, vy=0.0, t_at=None, t_cx=0.0, t_cy=0.0),
+    return dict(frames=0, lock=_StationaryLock(), size_history=deque(maxlen=SIZE_MEDIAN_WINDOW), motion=dict(cx=box[0] + box[2] / 2.0, cy=box[1] + box[3] / 2.0, vx=0.0, vy=0.0, t_at=None, t_cx=0.0, t_cy=0.0),
                 cx=_OneEuro(box[0] + box[2] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 cy=_OneEuro(box[1] + box[3] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 w=_OneEuro(box[2], SIZE_MIN_CUTOFF_HZ, SIZE_BETA),
@@ -222,7 +233,7 @@ class ModelTrackGate:
             elif score < threshold and not can_verify:
                 reason = "low_confidence"
             else:
-                smoothed = bool(continuous and previous and previous.get("filters"))
+                smoothed = bool(continuous and previous and previous.get("filters") and previous.get("emitted"))
                 if smoothed:
                     filters = previous["filters"]
                     dt = min(0.5, max(0.005, (now - previous["seen"]) / 1000.0))
@@ -230,9 +241,17 @@ class ModelTrackGate:
                                                    str(obj.get("tracking_state", "")).lower() != "predicted", now, dt)
                     cx = filters["cx"](cx_raw, dt)
                     cy = filters["cy"](cy_raw, dt)
-                    # Spike guard: a detector size outlier may move the filtered size by <= 8% per frame.
-                    w_smooth = filters["w"](max(filters["w"].value * .92, min(filters["w"].value * 1.08, box[2])), dt)
-                    h_smooth = filters["h"](max(filters["h"].value * .92, min(filters["h"].value * 1.08, box[3])), dt)
+                    # Size: median of the last few detections (drops one-frame outliers), then a spike guard
+                    # (<= 8% per frame) and a heavier low-pass for small boxes, whose pixel noise is a bigger fraction.
+                    filters["size_history"].append((box[2], box[3]))
+                    median_w = statistics.median(item[0] for item in filters["size_history"])
+                    median_h = statistics.median(item[1] for item in filters["size_history"])
+                    softness = max(.7, min(1.0, filters["h"].value / SMALL_BOX_HEIGHT))
+                    boost = WARMUP_BOOST if filters["frames"] < WARMUP_FRAMES else 1.0
+                    filters["frames"] += 1
+                    filters["w"].min_cutoff = filters["h"].min_cutoff = SIZE_MIN_CUTOFF_HZ * softness * boost
+                    w_smooth = filters["w"](max(filters["w"].value * .92, min(filters["w"].value * 1.08, median_w)), dt)
+                    h_smooth = filters["h"](max(filters["h"].value * .92, min(filters["h"].value * 1.08, median_h)), dt)
                     cx, cy, w_smooth, h_smooth = filters["lock"](cx_raw, cy_raw, box[2], box[3], (cx, cy, w_smooth, h_smooth))
                     smoothed_box = [max(0.0, min(1.0 - w_smooth, cx - w_smooth / 2.0)),
                                     max(0.0, min(1.0 - h_smooth, cy - h_smooth / 2.0)), w_smooth, h_smooth]
@@ -244,7 +263,8 @@ class ModelTrackGate:
                 candidate_hits = (previous.get("candidate_hits", 0) if continuous else 0) + 1
                 confirmed = hits >= 2 or confirmed
                 self.entries[key] = dict(box=box, smoothed_box=smoothed_box, filters=filters, class_scores=class_scores, class_leader=class_leader, hits=hits, candidate_hits=candidate_hits, confirmed=confirmed, seen=now,
-                                         last_out=(previous or {}).get("last_out"), out_at=(previous or {}).get("out_at"))
+                                         last_out=(previous or {}).get("last_out"), out_at=(previous or {}).get("out_at"),
+                                         emitted=(previous or {}).get("emitted", False))
                 if confirmed and score >= threshold:
                     if smoothed:
                         obj_out = dict(obj,
@@ -256,7 +276,7 @@ class ModelTrackGate:
                         obj_out = obj
                     output.append(obj_out)
                     emitted.add(key)
-                    self.entries[key]["last_out"], self.entries[key]["out_at"] = obj_out, now
+                    self.entries[key]["last_out"], self.entries[key]["out_at"], self.entries[key]["emitted"] = obj_out, now, True
                 elif can_verify and candidate_hits >= 2:
                     output.append(dict(obj, requires_label_verification=True))
                 else:
