@@ -1,4 +1,7 @@
 import math
+import os
+import statistics
+from collections import deque
 
 from core.model_track_masks import bbox, compatible_boxes, track_key
 
@@ -59,12 +62,49 @@ def _coast_center(motion, cx, cy, tracked, now, dt):
     return motion["cx"], motion["cy"]
 
 
+STILL_WINDOW = 10
+STILL_MIN_SAMPLES = 6
+STILL_CENTER_PX = 3.0
+STILL_SIZE_RATIO = .05
+
+
+class _StationaryLock:
+    """Detector noise keeps a parked robot's box breathing by a few pixels. While the raw box stays inside a
+    tiny envelope for ~0.4 s, output its median instead; any real movement leaves the envelope and unlocks."""
+
+    def __init__(self):
+        self.samples = deque(maxlen=STILL_WINDOW)
+        self.out = None
+        self.locked = False
+
+    def __call__(self, cx, cy, w, h, filtered):
+        self.samples.append((cx, cy, w, h))
+        locked, target = False, filtered
+        if len(self.samples) >= STILL_MIN_SAMPLES:
+            columns = list(zip(*self.samples))
+            spread = [max(column) - min(column) for column in columns]
+            median = [statistics.median(column) for column in columns]
+            if (spread[0] < STILL_CENTER_PX / 1280 and spread[1] < STILL_CENTER_PX / 720
+                    and spread[2] < STILL_SIZE_RATIO * median[2] and spread[3] < STILL_SIZE_RATIO * median[3]):
+                locked, target = True, tuple(median)
+        if self.out is None or not (locked or self.locked):
+            self.out = target
+        else:  # ease into / out of the lock so it never snaps
+            self.out = tuple(o + .5 * (t - o) for o, t in zip(self.out, target))
+        self.locked = locked
+        return self.out
+
+
 def _box_filters(box):
-    return dict(motion=dict(cx=box[0] + box[2] / 2.0, cy=box[1] + box[3] / 2.0, vx=0.0, vy=0.0, t_at=None, t_cx=0.0, t_cy=0.0),
+    return dict(lock=_StationaryLock(), motion=dict(cx=box[0] + box[2] / 2.0, cy=box[1] + box[3] / 2.0, vx=0.0, vy=0.0, t_at=None, t_cx=0.0, t_cy=0.0),
                 cx=_OneEuro(box[0] + box[2] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 cy=_OneEuro(box[1] + box[3] / 2.0, POSITION_MIN_CUTOFF_HZ, POSITION_BETA),
                 w=_OneEuro(box[2], SIZE_MIN_CUTOFF_HZ, SIZE_BETA),
                 h=_OneEuro(box[3], SIZE_MIN_CUTOFF_HZ, SIZE_BETA))
+
+
+# A track the detector has not re-confirmed for this long is dropped (the tracker keeps predicting meanwhile).
+DETECTOR_STALE_MS = float(os.getenv("DETECTOR_STALE_MS", "500"))
 
 
 class ModelTrackGate:
@@ -121,7 +161,7 @@ class ModelTrackGate:
             reason = None
             if not valid or min(box[2] * 1280, box[3] * 720) < 8:
                 reason = "invalid_or_tiny_box"
-            elif now - detected_at > 300 or detected_at > now + 50:
+            elif now - detected_at > DETECTOR_STALE_MS or detected_at > now + 50:
                 reason = "detector_stale"
             elif score < threshold and not can_verify:
                 reason = "low_confidence"
@@ -137,6 +177,7 @@ class ModelTrackGate:
                     # Spike guard: a detector size outlier may move the filtered size by <= 8% per frame.
                     w_smooth = filters["w"](max(filters["w"].value * .92, min(filters["w"].value * 1.08, box[2])), dt)
                     h_smooth = filters["h"](max(filters["h"].value * .92, min(filters["h"].value * 1.08, box[3])), dt)
+                    cx, cy, w_smooth, h_smooth = filters["lock"](cx_raw, cy_raw, box[2], box[3], (cx, cy, w_smooth, h_smooth))
                     smoothed_box = [max(0.0, min(1.0 - w_smooth, cx - w_smooth / 2.0)),
                                     max(0.0, min(1.0 - h_smooth, cy - h_smooth / 2.0)), w_smooth, h_smooth]
                 else:

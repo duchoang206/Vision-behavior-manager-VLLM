@@ -13,6 +13,7 @@ from core.deepstream_geometry import clamp_normalized_polygon, normalize_stream_
 
 
 PREFERRED_TRACK_MARGIN = 0.20
+DETECTOR_STALE_S = float(os.getenv("DETECTOR_STALE_MS", "500")) / 1000.0
 
 
 def limit_one_object_per_class(objects, preferred=None):
@@ -283,7 +284,7 @@ def run(settings):
                         confidence_cache[key] = (confidence, now)
                     cached = confidence_cache.get(key, (0, 0))
                     observed_at = cached[1]
-                    if 0 <= class_id < len(labels) and track_id != 2**64 - 1 and now - observed_at < .3:
+                    if 0 <= class_id < len(labels) and track_id != 2**64 - 1 and now - observed_at < DETECTOR_STALE_S:
                         rect = obj.rect_params
                         if metadata_coordinates == "network":
                             left, top, width, height = unletterbox_bbox(

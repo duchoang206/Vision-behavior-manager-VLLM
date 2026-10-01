@@ -219,6 +219,29 @@ class ModelLabelGateTests(unittest.TestCase):
         self.assertGreater(min(steps), 0)
         self.assertLess(max(steps) / min(steps), 1.8)
 
+    def test_parked_box_is_locked_and_released_when_it_moves(self):
+        gate = ModelTrackGate()
+        noise = [0, .8, -.5, .4, -.7, .55, -.3, .65, -.6, .25]
+        outputs = []
+        for frame in range(60):
+            now = 1000 + frame * 40
+            jitter = noise[frame % len(noise)] / 1280
+            out, _ = gate.filter("cam", [tracked(category="robot", x=.40 + jitter, y=.40, w=.10 + jitter, h=.12,
+                                                 tracking_state="tracked", detected_at=now)], now)
+            if out:
+                outputs.append(out[0])
+        settled = outputs[-25:]
+        self.assertLess((max(o["x"] for o in settled) - min(o["x"] for o in settled)) * 1280, .6)
+        self.assertLess((max(o["w"] for o in settled) - min(o["w"] for o in settled)) * 1280, .6)
+
+        last = settled[-1]["x"]
+        for frame in range(60, 75):
+            now = 1000 + frame * 40
+            true_x = .40 + (frame - 59) * .006
+            out, _ = gate.filter("cam", [tracked(category="robot", x=true_x, y=.40, w=.10, h=.12,
+                                                 tracking_state="tracked", detected_at=now)], now)
+        self.assertGreater((out[0]["x"] - last) * 1280, 40)  # followed >40 of the 115 px it moved
+
     def test_label_candidates_reach_verification_without_relaxing_plain_detection(self):
         gate = ModelTrackGate()
         self.assertFalse(gate.filter("cam", [tracked(confidence=.35)], 1000, {"robot"})[0])
