@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/backend/:path*',
-        destination: 'http://127.0.0.1:8000/api/:path*' // Proxy to Python backend
+        // Proxy to Python backend (override for side-by-side dev instances)
+        destination: `${process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000'}/api/:path*`
       }
     ]
   },

@@ -17,6 +17,7 @@ const descriptions = {
   robot_map: { en: 'Your fleet and workspace, connected in real time.', vi: 'Kết nối đội robot và không gian vận hành theo thời gian thực.' },
   analytics: { en: 'Explore activity, reports and operational insights.', vi: 'Theo dõi hoạt động, báo cáo và dữ liệu vận hành.' },
   workflow: { en: 'Build, deploy and supervise your vision workflows.', vi: 'Thiết kế, triển khai và theo dõi pipeline xử lý Vision.' },
+  system_config: { en: 'FMS WCS gateway, PLC and peripheral device communication.', vi: 'Cổng truyền thông FMS WCS, PLC và điều khiển thiết bị ngoại vi.' },
   logs: { en: 'Search structured system logs and compressed archives.', vi: 'Truy vấn nhật ký hệ thống và kho lưu trữ nén.' },
 };
 

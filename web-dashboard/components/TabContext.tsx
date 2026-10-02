@@ -2,7 +2,9 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type TabType = 'monitor' | 'building' | 'calibration' | 'robot_map' | 'analytics' | 'workflow' | 'logs';
+export type TabType = 'monitor' | 'building' | 'calibration' | 'robot_map' | 'analytics' | 'workflow' | 'system_config' | 'logs';
+
+const TAB_IDS: readonly string[] = ['monitor', 'building', 'calibration', 'robot_map', 'analytics', 'workflow', 'system_config', 'logs'];
 
 interface TabContextType {
   activeTab: TabType;
@@ -23,14 +25,14 @@ export function TabProvider({ children }: { children: React.ReactNode }) {
       const tabParam = params.get('tab') as TabType;
       const hash = window.location.hash.replace('#', '') as TabType;
       const initial = tabParam || hash;
-      if (['monitor', 'building', 'calibration', 'robot_map', 'analytics', 'workflow', 'logs'].includes(initial)) {
+      if (TAB_IDS.includes(initial)) {
         setActiveTab(initial);
       }
 
       const handlePopState = () => {
         const p = new URLSearchParams(window.location.search);
         const t = p.get('tab') as TabType;
-        if (['monitor', 'building', 'calibration', 'robot_map', 'analytics', 'workflow', 'logs'].includes(t)) {
+        if (TAB_IDS.includes(t)) {
           setActiveTab(t);
         }
       };

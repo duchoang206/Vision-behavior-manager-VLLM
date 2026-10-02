@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Video, Building2, Bot, BarChart3, Crosshair, GitBranch, Terminal } from 'lucide-react';
+import { Video, Building2, Bot, BarChart3, Crosshair, GitBranch, SlidersHorizontal, Terminal } from 'lucide-react';
 import { useLanguage } from './LanguageContext';
 import { useTab, type TabType } from './TabContext';
 import styles from './DashboardShell.module.css';
@@ -13,6 +13,7 @@ export const workspaceTabs = [
   { id: 'robot_map', labelKey: 'robotMap', icon: Bot, keywords: 'map robot 3d bản đồ fms' },
   { id: 'analytics', labelKey: 'analytics', icon: BarChart3, keywords: 'analytics report phân tích báo cáo' },
   { id: 'workflow', labelKey: 'workflow', icon: GitBranch, keywords: 'workflow editor deploy pipeline tác vụ quy trình' },
+  { id: 'system_config', labelKey: 'systemConfig', icon: SlidersHorizontal, keywords: 'system config cấu hình hệ thống fms wcs plc modbus thiết bị ngoại vi call box kênh truyền thông' },
   { id: 'logs', labelKey: 'logs', icon: Terminal, keywords: 'system logs nhật ký hệ thống lỗi truy vấn' },
 ] as const;
 

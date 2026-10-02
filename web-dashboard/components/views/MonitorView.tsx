@@ -117,6 +117,7 @@ type InterpolatedFloorTrack = {
 type ROIState = {
   roi_id: string;
   name: string;
+  fms_slot_id?: string | null;
   status: 'OCCUPIED' | 'CARFULL' | 'EMPTY';
   overlap_ratio: number;
   occupant_ids: (number | string)[];
@@ -139,6 +140,7 @@ type CameraRuleResponse = {
   fms_points?: number[][];
   coordinate_space?: string;
   threshold?: number;
+  fms_slot_id?: string | null;
 };
 
 type MapOverviewItem = Record<string, unknown>;
@@ -173,6 +175,7 @@ const isCameraDrawableRoi = (roi: ROIState) =>
   && ((roi.rule_type || '').toLowerCase() !== 'occupancy' || isStorageSlotRoi(roi));
 const filterRealConfiguredRois = (rois: ROIState[]) =>
   rois.filter(roi => (roi.rule_type || '').toLowerCase() !== 'occupancy' || isStorageSlotRoi(roi));
+const NO_ROIS: ROIState[] = [];
 const TRACK_HOLD_MS = 1200;
 const TRACK_FADE_START_MS = 350;
 
@@ -206,6 +209,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
   roisMap,
   metadataCount,
   metadataConnected,
+  storageRois,
   onLabel,
   onLearn
 }: {
@@ -218,6 +222,7 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
   roisMap: React.MutableRefObject<Map<string, ROIState[]>>;
   metadataCount: number;
   metadataConnected: boolean;
+  storageRois: ROIState[];
   onLabel: (cameraId: string) => void;
   onLearn: (cameraId: string) => void;
 }) {
@@ -650,10 +655,74 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
             pointerEvents: 'none', zIndex: 10
           }}
         />
+
+        {/* Storage slot states as reported to FMS: "ROI [Slot 5] · CAR FULL" */}
+        {storageRois.length > 0 && (
+          <div style={{
+            position: 'absolute', top: '8px', right: '8px', zIndex: 12, pointerEvents: 'none',
+            display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', maxWidth: '60%',
+          }}>
+            {storageRois.slice(0, 6).map(roi => {
+              const full = roi.status === 'CARFULL' || roi.status === 'OCCUPIED';
+              return (
+                <span key={roi.roi_id} style={{
+                  background: full ? 'rgba(127, 29, 29, 0.82)' : 'rgba(6, 78, 59, 0.82)',
+                  border: `1px solid ${full ? '#f43f5e' : '#10b981'}`, color: '#fff',
+                  borderRadius: '6px', padding: '3px 8px', fontSize: '11px', fontWeight: 700,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+                  backdropFilter: 'blur(4px)', boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}>
+                  {roi.name}{roi.fms_slot_id ? ` [Slot ${roi.fms_slot_id}]` : ''} · {full ? 'CAR FULL' : 'EMPTY'}
+                </span>
+              );
+            })}
+            {storageRois.length > 6 && <span style={{ color: '#cbd5e1', fontSize: '10px' }}>+{storageRois.length - 6} ô khác</span>}
+          </div>
+        )}
       </div>
     </div>
   );
 });
+
+type FmsLinkStatus = { configured: boolean; connected: boolean; clients: number };
+
+function FmsLinkBadge({ isActive, isDark }: { isActive: boolean; isDark: boolean }) {
+  const [status, setStatus] = useState<FmsLinkStatus | null>(null);
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    let first = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      if (first || !document.hidden) {
+        first = false;
+        try {
+          const response = await fetch('/api/backend/comm/status', { cache: 'no-store' });
+          if (response.ok) {
+            const data = await response.json();
+            if (!cancelled) setStatus(data.fms);
+          }
+        } catch {}
+      }
+      if (!cancelled) timer = setTimeout(poll, 3000);
+    };
+    void poll();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isActive]);
+  if (!status?.configured) return null;
+  const color = status.connected ? '#10b981' : (isDark ? '#94a3b8' : '#64748b');
+  return (
+    <span role="status" title="Kết nối WebSocket từ FMS WCS (thiết bị CAMERA_AI)" style={{
+      display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px',
+      fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', color,
+      border: `1px solid ${status.connected ? 'rgba(16,185,129,0.4)' : 'rgba(148,163,184,0.3)'}`,
+      background: status.connected ? 'rgba(16,185,129,0.1)' : 'transparent',
+    }}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: status.connected ? `0 0 8px ${color}` : 'none' }} />
+      FMS WCS: {status.connected ? `Đã kết nối (${status.clients} Client)` : 'Chờ kết nối...'}
+    </span>
+  );
+}
 
 export default function MonitorView({ isActive = true }: { isActive?: boolean } = {}) {
 	  const { cameras } = useCameras();
@@ -717,6 +786,10 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
     return allStorageSlots;
   }, [allStorageSlots, slotFilter]);
 
+  const storageRoisByCam = React.useMemo(() => Object.fromEntries(
+    Object.entries(cameraRois).map(([camId, rois]) => [camId, rois.filter(isStorageSlotRoi)])
+  ) as Record<string, ROIState[]>, [cameraRois]);
+
   const occupiedSlotsCount = allStorageSlots.filter(s => s.status === 'CARFULL').length;
   const emptySlotsCount = allStorageSlots.length - occupiedSlotsCount;
   const occupancyPercent = allStorageSlots.length > 0 ? Math.round((occupiedSlotsCount / allStorageSlots.length) * 100) : 0;
@@ -759,6 +832,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 	              return {
 	                roi_id: r.id,
 	                name: r.name,
+	                fms_slot_id: r.fms_slot_id ?? null,
 	                status: 'EMPTY',
 	                overlap_ratio: 0,
 	                occupant_ids: [],
@@ -1090,6 +1164,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
 
           {/* Right Action & Status Badges */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <FmsLinkBadge isActive={isActive} isDark={isDark} />
             {!isRightPanelOpen && (
               <button
                 onClick={() => setIsRightPanelOpen(true)}
@@ -1175,6 +1250,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
                     roisMap={roisMap}
                     metadataCount={metadataCounts[cam.id] || 0}
                     metadataConnected={metadataConnected}
+                    storageRois={storageRoisByCam[cam.id] || NO_ROIS}
                     onLabel={setLabelCameraId}
                     onLearn={setLearningCameraId}
                   />

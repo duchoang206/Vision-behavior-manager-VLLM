@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 
 const WorkflowView = dynamic(() => import('../components/views/WorkflowView'), { ssr: false });
 const SystemLogsView = dynamic(() => import('../components/views/SystemLogsView'), { ssr: false });
+const SystemConfigView = dynamic(() => import('../components/views/SystemConfigView'), { ssr: false });
 
 export default function DashboardRoot() {
   const { activeTab } = useTab();
@@ -22,6 +23,7 @@ export default function DashboardRoot() {
   return (
     <>
       {activeTab === 'logs' && <SystemLogsView />}
+      {activeTab === 'system_config' && <SystemConfigView active />}
       <div style={{ display: activeTab === 'workflow' ? 'block' : 'none' }}>
         {(workflowOpened || activeTab === 'workflow') && <WorkflowView active={activeTab === 'workflow'} />}
       </div>
