@@ -1378,7 +1378,7 @@ async def save_camera_rules(cam_id: str, req: SaveRulesRequest):
 
 @app.get("/api/camera/{cam_id}/rules")
 async def get_camera_rules(cam_id: str):
-    db_manager.delete_invalid_occupancy_rules(cam_id)
+    # Read-only: never prune user rules on a GET (startup does the safe cleanup).
     rules = db_manager.get_rules_by_camera(cam_id)
     return {"status": "success", "rules": rules}
 
