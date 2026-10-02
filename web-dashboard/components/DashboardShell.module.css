@@ -83,6 +83,15 @@
 .profileText { display: flex; flex-direction: column; }
 .profileText strong { font-size: 11px; font-weight: 600; }
 .profileText small { font-size: 9px; color: var(--shell-muted); }
+button.profile { font: inherit; color: var(--shell-text); cursor: pointer; text-align: left; }
+button.profile:hover { background: var(--shell-hover); }
+button.profile:focus-visible, .logoutButton:focus-visible { outline: 2px solid var(--accent, #f59e0b); outline-offset: 2px; }
+.profileChevron { color: var(--shell-muted); flex-shrink: 0; }
+.profileMenu { width: 200px; }
+.profileMenuUser { display: flex; flex-direction: column; gap: 2px; padding: 8px 9px 9px; margin-bottom: 4px; border-bottom: 1px solid var(--shell-border); font-size: 10px; color: var(--shell-muted); }
+.profileMenuUser strong { font-size: 12px; color: var(--shell-text); overflow-wrap: anywhere; }
+.languageMenu button.logoutButton { color: var(--rose, #f43f5e); }
+.languageMenu button.logoutButton:disabled { opacity: .6; cursor: wait; }
 .searchArea { position: relative; margin-top: 17px; }
 .searchField { display: flex; gap: 8px; align-items: center; height: 34px; padding: 0 10px; background: var(--shell-input); border: 1px solid var(--shell-border); border-radius: 8px; color: var(--shell-muted); }
 .searchField input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--shell-text); font-size: 11px; height: 100%; }
@@ -137,7 +146,7 @@
   .heading > span { font-size: 8px; letter-spacing: 1px; }
   .actions { gap: 5px; }
   .themeButton { width: 32px; padding: 0; }
-  .themeButton > span, .profile { display: none; }
+  .themeButton > span, .profileChevron { display: none; }
   .languageButton { gap: 4px; padding-inline: 7px; }
   .description { line-height: 1.6; }
   .content { overscroll-behavior: contain; }

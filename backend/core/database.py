@@ -342,8 +342,12 @@ class DatabaseManager:
 
     def delete_invalid_occupancy_rules(self, cam_id: Optional[str] = None) -> int:
         """
-        Removes legacy/test storage-slot rules that were saved before the hybrid
-        Camera + FMS polygon workflow existed. A real storage slot must have both.
+        Removes storage-slot rules that carry no usable polygon at all.
+
+        A slot is valid with a camera polygon alone (the FMS polygon is optional),
+        so only rules where neither ``camera_points`` nor ``points`` has three
+        vertices are deleted.  Requiring an FMS polygon here used to wipe every
+        camera-only slot the Building tab saved.
         """
         with self._lock:
             try:
@@ -353,10 +357,8 @@ class DatabaseManager:
                 query = """
                     DELETE FROM rules
                     WHERE rule_type = 'occupancy'
-                      AND (
-                        CASE WHEN jsonb_typeof(camera_points) = 'array' THEN jsonb_array_length(camera_points) ELSE 0 END < 3
-                        OR CASE WHEN jsonb_typeof(fms_points) = 'array' THEN jsonb_array_length(fms_points) ELSE 0 END < 3
-                      )
+                      AND CASE WHEN jsonb_typeof(camera_points) = 'array' THEN jsonb_array_length(camera_points) ELSE 0 END < 3
+                      AND CASE WHEN jsonb_typeof(points) = 'array' THEN jsonb_array_length(points) ELSE 0 END < 3
                 """
                 if cam_id:
                     query += " AND cam_id = %s"
