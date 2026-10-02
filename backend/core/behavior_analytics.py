@@ -36,6 +36,20 @@ class BehaviorAnalyticsEngine:
         # model-scoped as well: independently deployed models may both use id=1.
         self.alert_cooldowns: Dict[Tuple[Any, ...], float] = {}
 
+        # Communication gateway hooks.  Called from frame threads; listeners
+        # must only hand work off (e.g. call_soon_threadsafe) and return.
+        self.transition_listener = None  # (cam_id, rule, status, info) on confirmed slot state
+        self.rules_listener = None       # (cam_id, parsed_rules) after set_rules
+        self.alert_listener = None       # (event) for intrusion / dwell / density alerts
+
+    def _notify(self, listener, *args):
+        if listener is None:
+            return
+        try:
+            listener(*args)
+        except Exception as exc:  # never let I/O wiring break video analytics
+            print(f"[BehaviorAnalytics] listener error: {exc}", flush=True)
+
     def _target_matches(self, obj: dict, target_objects: List[str]) -> bool:
         if not target_objects:
             return True
@@ -242,6 +256,9 @@ class BehaviorAnalyticsEngine:
                 "model_id": r.get("model_id"),
                 "severity": r.get("severity", "warning"),
                 "cooldown_sec": float(r.get("cooldown_sec", 3.0)),
+                "fms_slot_id": (str(r.get("fms_slot_id")).strip() if r.get("fms_slot_id") not in (None, "") else None),
+                "comm_channel_id": r.get("comm_channel_id") or None,
+                "enable_fms_dispatch": r.get("enable_fms_dispatch") is not False,
             }
             
             if rule_type in ("intrusion", "dwell_time", "crowd_density", "occupancy") and len(points) >= 3:
@@ -282,8 +299,9 @@ class BehaviorAnalyticsEngine:
             parsed_rules.append(rule_obj)
             if rule_id not in self.tripwire_counts:
                 self.tripwire_counts[rule_id] = {"in": 0, "out": 0}
-                
+
         self.rules[cam_id] = parsed_rules
+        self._notify(self.rules_listener, cam_id, parsed_rules)
 
     def process_frame(self, cam_id: str, objects: List[dict]) -> Tuple[List[dict], Dict[str, dict], List[dict]]:
         """
@@ -421,6 +439,7 @@ class BehaviorAnalyticsEngine:
                 raw_occupant_ids = []
                 raw_occupant_labels = []
                 raw_occupant_identities = []
+                raw_occupant_confidences = []
                 max_overlap_ratio = 0.0
                 seen_candidates = set()
 
@@ -433,6 +452,7 @@ class BehaviorAnalyticsEngine:
                     seen_candidates.add(candidate_key)
                     raw_occupant_ids.append(candidate_id)
                     raw_occupant_labels.append(candidate_label)
+                    raw_occupant_confidences.append((o.get("raw") or o).get("confidence"))
                     raw_occupant_identities.append(
                         o.get("object_identity")
                         or self._object_identity(o.get("raw") or o)
@@ -527,7 +547,8 @@ class BehaviorAnalyticsEngine:
                         "occupant_labels": []
                     }
                 filter_state = self.roi_states_filter[state_key]
-                
+                confirmed_status = None
+
                 if instant_occupied:
                     filter_state["occ_frames"] += 1
                     filter_state["empty_frames"] = 0
@@ -536,7 +557,8 @@ class BehaviorAnalyticsEngine:
                     # Cần >= 2 frame liên tiếp để chuyển sang CARFULL (chống noise 1-frame, phản hồi nhanh)
                     if filter_state["occ_frames"] >= 2 and filter_state["status"] != "CARFULL":
                         filter_state["status"] = "CARFULL"
-                        
+                        confirmed_status = "CARFULL"
+
                         # Trigger Alarm Event
                         occupant_identity = (raw_occupant_identities[0]
                                               if raw_occupant_identities else ("default", "", "0"))
@@ -559,14 +581,29 @@ class BehaviorAnalyticsEngine:
                     filter_state["empty_frames"] += 1
                     filter_state["occ_frames"] = 0
                     # Cần >= 5 frame liên tiếp trống để chuyển về EMPTY (chống mất nhận diện tạm thời khi bị che khuất)
-                    if filter_state["empty_frames"] >= 5 and filter_state["status"] != "EMPTY":
+                    if filter_state["empty_frames"] >= 5 and (
+                            filter_state["status"] != "EMPTY" or not filter_state.get("confirmed")):
                         filter_state["status"] = "EMPTY"
                         filter_state["occupant_ids"] = []
                         filter_state["occupant_labels"] = []
+                        confirmed_status = "EMPTY"
+
+                # A slot starts "EMPTY" by default; the first confirmed EMPTY
+                # (5 clear frames) is reported once so downstream systems learn
+                # the initial state, then only real transitions are emitted.
+                if confirmed_status and rule_type == "occupancy":
+                    filter_state["confirmed"] = True
+                    self._notify(self.transition_listener, cam_id, rule, confirmed_status, {
+                        "occupant_labels": list(filter_state["occupant_labels"]),
+                        "occupant_ids": list(filter_state["occupant_ids"]),
+                        "overlap_ratio": round(max_overlap_ratio, 2),
+                        "confidence": next((c for c in raw_occupant_confidences if c is not None), None),
+                    })
 
                 roi_states.append({
                     "roi_id": rule_id,
                     "name": rule["name"],
+                    "fms_slot_id": rule.get("fms_slot_id"),
                     "status": filter_state["status"],  # "CARFULL" | "EMPTY"
                     "occupant_ids": filter_state["occupant_ids"],
                     "occupant_labels": filter_state.get("occupant_labels", raw_occupant_labels),
@@ -653,7 +690,13 @@ class BehaviorAnalyticsEngine:
 
         # Cleanup expired track positions
         self._cleanup(now, current_object_ids, cam_id)
-        
+
+        if self.alert_listener is not None:
+            names = {r["id"]: r.get("name") for r in cam_rules}
+            for event in triggered_events:
+                if event.get("rule_type") != "occupancy":
+                    self._notify(self.alert_listener, {**event, "rule_name": names.get(event.get("rule_id"), "")})
+
         return triggered_events, self.get_tripwire_stats(cam_id), roi_states
 
     def _cleanup(self, now: float, current_object_ids: set, cam_id: str):

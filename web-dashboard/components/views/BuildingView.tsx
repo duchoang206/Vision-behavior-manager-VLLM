@@ -6,6 +6,7 @@ import { useCameras } from '../CameraContext';
 import { useTab } from '../TabContext';
 import { useAppTheme } from '../ThemeContext';
 import ModelManager from './ModelManager';
+import { commApi, isFmsFormat, isFmsSlotId, type CommChannel } from '../../lib/comm-gateway';
 import ModelLabelManager from './ModelLabelManager';
 import CameraSources from './CameraSources';
 import {
@@ -21,6 +22,7 @@ type Rule = {
   id: string; type?: string; rule_type?: string; name: string;
   points: number[][]; target_objects?: string[]; threshold?: number; direction?: string;
   camera_points?: number[][]; fms_points?: number[][]; coordinate_space?: string;
+  fms_slot_id?: string | null; comm_channel_id?: string | null; enable_fms_dispatch?: boolean | null;
 };
 
 type DrawSpace = 'camera' | 'fms';
@@ -147,6 +149,10 @@ export default function BuildingView() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const [currentTargetClasses, setCurrentTargetClasses] = useState<string[]>(['robot', 'rack']);
+  const [currentSlotId, setCurrentSlotId] = useState('');
+  const [currentChannelId, setCurrentChannelId] = useState('');
+  const [currentFmsDispatch, setCurrentFmsDispatch] = useState(true);
+  const [commChannels, setCommChannels] = useState<CommChannel[]>([]);
   const [fmsLayout, setFmsLayout] = useState<FmsLayout | null>(null);
   const { activeTab: workspaceTab } = useTab();
 
@@ -188,6 +194,11 @@ export default function BuildingView() {
     fetch('/api/backend/model/classes').then(r => r.json())
       .then(d => { if (d.classes?.length > 0) setAvailableClasses(d.classes); }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (workspaceTab !== 'building' || activeTab !== 'rules') return;
+    commApi.channels().then(setCommChannels).catch(() => {});
+  }, [workspaceTab, activeTab]);
 
   useEffect(() => {
     let mounted = true;
@@ -280,6 +291,9 @@ export default function BuildingView() {
     setCurrentRuleName('');
     setEditingRuleId(null);
     setRuleDrawSpace('camera');
+    setCurrentSlotId('');
+    setCurrentChannelId('');
+    setCurrentFmsDispatch(true);
   };
 
   const handleSaveCurrentRule = async () => {
@@ -301,7 +315,12 @@ export default function BuildingView() {
       fms_points: isStorageSlot ? currentFmsPoints : [],
       coordinate_space: isStorageSlot ? 'hybrid' : 'camera',
       target_objects: currentTargetClasses,
-      threshold: currentThreshold
+      threshold: currentThreshold,
+      ...(isStorageSlot ? {
+        fms_slot_id: currentSlotId.trim() || null,
+        comm_channel_id: currentChannelId || null,
+        enable_fms_dispatch: currentFmsDispatch,
+      } : {}),
     };
     const updated = editingRuleId
       ? rules.map(rule => rule.id === editingRuleId ? nr : rule)
@@ -322,6 +341,9 @@ export default function BuildingView() {
     setCurrentFmsPoints(getRuleFmsPoints(rule));
     setRuleDrawSpace('camera');
     setIsDrawing(false);
+    setCurrentSlotId(rule.fms_slot_id ? String(rule.fms_slot_id) : '');
+    setCurrentChannelId(rule.comm_channel_id || '');
+    setCurrentFmsDispatch(rule.enable_fms_dispatch !== false);
   };
 
   const handleDeleteRule = async (ruleId: string) => {
@@ -484,6 +506,37 @@ export default function BuildingView() {
                   placeholder="VD: Cửa thoát hiểm..." style={inputStyle} {...focusHandlers} />
               </div>
 
+              {isStorageRule && (() => {
+                const selectedChannel = commChannels.find(c => c.id === currentChannelId);
+                const feedsFms = selectedChannel ? isFmsFormat(selectedChannel) : commChannels.some(isFmsFormat);
+                const slotWarning = currentSlotId.trim() !== '' && feedsFms && !isFmsSlotId(currentSlotId);
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', borderRadius: '10px', border: `1px solid ${C.cyanBorder}`, background: C.cyanDim }}>
+                    <div>
+                      <label style={labelStyle} htmlFor="rule-fms-slot">Mã ô FMS (Slot ID)</label>
+                      <input id="rule-fms-slot" type="text" inputMode="numeric" value={currentSlotId} onChange={e => setCurrentSlotId(e.target.value)}
+                        placeholder="VD: 5" style={{ ...inputStyle, borderColor: slotWarning ? C.rose : C.borderHard }} aria-invalid={slotWarning} {...focusHandlers} />
+                      <div style={{ fontSize: '11px', marginTop: '5px', color: slotWarning ? C.rose : C.textMuted }}>
+                        {slotWarning ? 'FMS WCS chỉ đọc Slot ID dạng số nguyên (stoi) — ô này sẽ bị bỏ qua khi gửi FMS.'
+                          : currentSlotId.trim() ? `Gửi FMS: {"slot_id": "${currentSlotId.trim()}", "state": "Car Full" | "Empty"}` : 'Để trống: không gửi FMS (kênh template dùng mã ROI).'}
+                      </div>
+                    </div>
+                    <div>
+                      <label style={labelStyle} htmlFor="rule-comm-channel">Kênh truyền thông</label>
+                      <select id="rule-comm-channel" value={currentChannelId} onChange={e => setCurrentChannelId(e.target.value)} style={selectStyle} {...focusHandlers}>
+                        <option value="">Tất cả kênh đăng ký sự kiện ô hàng</option>
+                        {commChannels.map(c => <option key={c.id} value={c.id}>{c.name}{c.is_enabled ? '' : ' (đang tắt)'}</option>)}
+                      </select>
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', cursor: 'pointer', fontSize: '12px', fontWeight: 700, color: C.textSub }}>
+                      Bật đồng bộ FMS
+                      <input type="checkbox" checked={currentFmsDispatch} onChange={e => setCurrentFmsDispatch(e.target.checked)}
+                        style={{ width: '18px', height: '18px', accentColor: C.accent }} />
+                    </label>
+                  </div>
+                );
+              })()}
+
               <div>
                 <label style={labelStyle}>Đối Tượng Áp Dụng</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -593,6 +646,15 @@ export default function BuildingView() {
 	                            <div style={{ color: C.textMuted, textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', marginBottom: '4px' }}>
 	                              {rType}{rType === 'occupancy' ? ` · CAM ${cameraCount} · FMS ${fmsCount}` : ''}
 	                            </div>
+                            {rType === 'occupancy' && (
+                              <div style={{ marginBottom: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  background: r.fms_slot_id ? C.cyanDim : C.cardAlt, color: r.fms_slot_id ? C.cyanL : C.textMuted,
+                                  border: `1px solid ${r.fms_slot_id ? C.cyanBorder : C.border}`, padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700,
+                                }}>{r.fms_slot_id ? `Slot ${r.fms_slot_id}` : 'Chưa gán Slot'}</span>
+                                {r.fms_slot_id && r.enable_fms_dispatch === false && <span style={{ color: C.textMuted, fontSize: '10px' }}>FMS: tắt</span>}
+                              </div>
+                            )}
                             {r.target_objects?.length ? (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                                 {r.target_objects.map(c => (

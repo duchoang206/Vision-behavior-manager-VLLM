@@ -54,6 +54,8 @@ from routers.model_labels import create_model_label_router
 from core.active_learning_store import ActiveLearningStore
 from core.active_learning_worker import ActiveLearningWorker
 from routers.active_learning import create_active_learning_router
+from core.comm_gateway import ChannelStore, gateway_manager
+from routers.comm_gateway import create_comm_gateway_router
 from deep_calib.adapter import status as deepcalib_status
 
 metadata_fusion = MetadataFusion(ttl=1.0, template_ttl=3.5)
@@ -65,6 +67,7 @@ ffmpeg_recorder = FFmpegRecorder(recording_store)
 system_log_store = SystemLogStore(db_manager)
 app.include_router(create_storage_router(recording_store, ffmpeg_recorder))
 app.include_router(create_system_log_router(system_log_store))
+app.include_router(create_comm_gateway_router(gateway_manager))
 app.include_router(create_calibration_projection_router(camera_calibrator, lambda: cameras,
     lambda: {"origin_x": fms_bridge.origin_x, "origin_y": fms_bridge.origin_y, "layout_depth": fms_bridge.layout_depth}))
 app.add_middleware(SystemRequestLogMiddleware, store=system_log_store)
@@ -500,6 +503,9 @@ class RuleItem(BaseModel):
     threshold: Optional[float] = 10.0
     direction: Optional[str] = "both"
     coordinate_space: Optional[str] = "camera"
+    fms_slot_id: Optional[str | int] = None
+    comm_channel_id: Optional[str] = None
+    enable_fms_dispatch: Optional[bool] = True
 
 class SaveRulesRequest(BaseModel):
     rules: List[RuleItem]
@@ -832,6 +838,18 @@ async def startup_event():
     except Exception as e:
         logging.error(f"Failed to start FMS Bridge: {e}")
 
+    # Communication gateway (FMS WCS slot feed + peripheral devices).  Wired
+    # before rules are restored so every storage slot is registered.
+    try:
+        gateway_manager.bind_store(ChannelStore(db_manager))
+        gateway_manager.set_camera_name_resolver(lambda cid: (cameras.get(cid) or {}).get("name") or cid)
+        behavior_engine.rules_listener = gateway_manager.sync_rules
+        behavior_engine.transition_listener = gateway_manager.on_slot_transition
+        behavior_engine.alert_listener = gateway_manager.on_roi_alert
+        await gateway_manager.start()
+    except Exception:
+        logging.exception("Communication gateway startup failed; video analytics continue")
+
     # Start 3D Digital Twin Real-Time Broadcaster (15 Hz)
     try:
         from src.server.digital_twin_bridge import digital_twin_bridge
@@ -943,6 +961,10 @@ async def shutdown_event():
         await fms_bridge.stop()
     except Exception as e:
         logging.error(f"Error stopping FMS Bridge: {e}")
+    try:
+        await gateway_manager.stop()
+    except Exception:
+        logging.exception("Error stopping communication gateway")
     system_log_store.emit("info", "gateway", "shutdown", "R-SkyView backend stopping")
     await asyncio.to_thread(system_log_store.stop)
 
@@ -1104,6 +1126,8 @@ async def delete_camera(cam_id: str):
 
     db_manager.delete_camera(cam_id)
     online_robot_calibration.remove_camera(cam_id)
+    behavior_engine.set_rules(cam_id, [])
+    gateway_manager.remove_camera(cam_id)
     cameras.pop(cam_id, None)
     return {"status": "success", "deleted_id": cam_id}
 
@@ -1341,7 +1365,10 @@ async def save_camera_rules(cam_id: str, req: SaveRulesRequest):
             "target_objects": r.target_objects,
             "threshold": r.threshold,
             "direction": r.direction,
-            "coordinate_space": r.coordinate_space or "camera"
+            "coordinate_space": r.coordinate_space or "camera",
+            "fms_slot_id": str(r.fms_slot_id).strip() if r.fms_slot_id not in (None, "") else None,
+            "comm_channel_id": r.comm_channel_id or None,
+            "enable_fms_dispatch": r.enable_fms_dispatch is not False,
         }
         db_manager.save_rule(r_dict)
         rules_dict_list.append(r_dict)
@@ -1792,6 +1819,16 @@ async def get_digital_twin_telemetry():
     from src.server.digital_twin_bridge import digital_twin_bridge
     return digital_twin_bridge.build_telemetry_payload()
 
+# --- FMS WCS CAMERA GATEWAY (CAMERA_AI device, WebSocket client mode) ---
+@app.websocket("/ws/wcs_camera")
+async def websocket_wcs_camera_endpoint(websocket: WebSocket):
+    """FMS WCS connects here to receive storage-slot states ({"slots": [...]})."""
+    await gateway_manager.attach_fastapi_ws(websocket, "/ws/wcs_camera")
+
+@app.websocket("/ws/comm/{channel_id}")
+async def websocket_comm_channel_endpoint(websocket: WebSocket, channel_id: str):
+    await gateway_manager.attach_fastapi_ws(websocket, f"/ws/comm/{channel_id}", channel_id=channel_id)
+
 # --- FMS ROBOT 3D BRIDGE ENDPOINTS ---
 @app.websocket("/ws")
 @app.websocket("/ws/fms")
@@ -1832,7 +1869,8 @@ async def health_check():
     return {
         "status": "ok",
         "cameras_count": len(cameras),
-        "fms_bridge": fms_bridge.get_status()
+        "fms_bridge": fms_bridge.get_status(),
+        "comm_gateway": gateway_manager.fms_status(),
     }
 
 

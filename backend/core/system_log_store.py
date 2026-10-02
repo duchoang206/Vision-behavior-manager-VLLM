@@ -289,7 +289,9 @@ class SystemRequestLogMiddleware:
             await self.app(scope, receive, send)
             return
         path = scope.get("path", "")
-        if not path.startswith("/api/") or path.startswith("/api/system-logs") or path in {"/api/health", "/api/debug/metadata"}:
+        polled_reads = {"/api/comm/status", "/api/comm/channels", "/api/comm/slots", "/api/comm/logs"}
+        if (not path.startswith("/api/") or path.startswith("/api/system-logs") or path in {"/api/health", "/api/debug/metadata"}
+                or (scope.get("method") == "GET" and path in polled_reads)):
             await self.app(scope, receive, send)
             return
         started = time.monotonic()

@@ -13,6 +13,7 @@
 - [Đăng ký đa góc nhìn, Triplet metric và Calibration](identity-calibration.md)
 - [Đăng ký nhãn vật thể với SAM 2](guides/sam2_target_registration.md)
 - [Bản đồ 3D Digital Twin FMS](guides/fms_3d_digital_twin.md)
+- [Cổng truyền thông FMS WCS & thiết bị ngoại vi (System Config)](guides/fms_communication_gateway.md)
 - [Tối ưu hóa hiệu năng GPU](guides/gpu_optimization.md)
 - [Nhận diện 17 điểm dáng người & Té ngã](guides/pose_estimation_and_safety.md)
 

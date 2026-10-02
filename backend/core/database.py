@@ -97,6 +97,11 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS coordinate_space TEXT DEFAULT 'camera'")
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS camera_points JSONB")
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS fms_points JSONB")
+            # FMS / communication gateway binding of storage-slot ROIs
+            cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS fms_slot_id VARCHAR(64)")
+            cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS comm_channel_id VARCHAR(64)")
+            cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS enable_fms_dispatch BOOLEAN DEFAULT TRUE")
+            self._create_comm_schema(cursor)
             
             # 4. Tripwire Aggregate Counts Table
             cursor.execute('''
@@ -137,6 +142,41 @@ class DatabaseManager:
             print("[DatabaseManager] PostgreSQL Schema initialized successfully.")
         except Exception as e:
             print(f"[DatabaseManager] Database init warning (PostgreSQL might still be starting): {e}")
+
+    @staticmethod
+    def _create_comm_schema(cursor):
+        # Communication gateway channels (FMS WCS, PLC, peripheral devices)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS comm_channels (
+                id VARCHAR(64) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                protocol VARCHAR(32) NOT NULL,
+                mode VARCHAR(16) NOT NULL DEFAULT 'SERVER',
+                host VARCHAR(255) DEFAULT '0.0.0.0',
+                port INTEGER NOT NULL DEFAULT 8000,
+                endpoint_path VARCHAR(255) DEFAULT '/ws/wcs_camera',
+                auth_config JSONB DEFAULT '{}',
+                payload_template TEXT NOT NULL,
+                trigger_events JSONB DEFAULT '["SLOT_CARFULL", "SLOT_EMPTY"]',
+                is_enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute("ALTER TABLE comm_channels ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''")
+        cursor.execute("ALTER TABLE comm_channels ADD COLUMN IF NOT EXISTS device_type VARCHAR(32) DEFAULT 'GENERIC'")
+        cursor.execute("ALTER TABLE comm_channels ADD COLUMN IF NOT EXISTS priority INTEGER DEFAULT 1")
+        cursor.execute("ALTER TABLE comm_channels ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'")
+
+    def ensure_comm_schema(self):
+        """Idempotent; lets the gateway recover when PostgreSQL was late at boot."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                self._create_comm_schema(conn.cursor())
+                conn.commit()
+            finally:
+                conn.close()
 
     # --- CAMERAS & CALIBRATION ---
     def save_camera(self, cam_id: str, name: str, rtsp_url: str) -> bool:
@@ -240,10 +280,14 @@ class DatabaseManager:
                 conn = self._get_connection()
                 cursor = conn.cursor()
                 r_type = rule.get("type") or rule.get("rule_type") or "intrusion"
+                slot_id = rule.get("fms_slot_id")
+                slot_id = str(slot_id).strip() if slot_id not in (None, "") else None
+                enable_dispatch = rule.get("enable_fms_dispatch")
                 cursor.execute('''
-                    INSERT INTO rules (id, cam_id, rule_type, name, points, target_objects, threshold, direction, coordinate_space, camera_points, fms_points)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO UPDATE SET 
+                    INSERT INTO rules (id, cam_id, rule_type, name, points, target_objects, threshold, direction, coordinate_space, camera_points, fms_points,
+                                       fms_slot_id, comm_channel_id, enable_fms_dispatch)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (id) DO UPDATE SET
                         rule_type = EXCLUDED.rule_type,
                         name = EXCLUDED.name,
                         points = EXCLUDED.points,
@@ -252,7 +296,10 @@ class DatabaseManager:
                         direction = EXCLUDED.direction,
                         coordinate_space = EXCLUDED.coordinate_space,
                         camera_points = EXCLUDED.camera_points,
-                        fms_points = EXCLUDED.fms_points
+                        fms_points = EXCLUDED.fms_points,
+                        fms_slot_id = EXCLUDED.fms_slot_id,
+                        comm_channel_id = EXCLUDED.comm_channel_id,
+                        enable_fms_dispatch = EXCLUDED.enable_fms_dispatch
                 ''', (
                     rule["id"], rule["cam_id"], r_type, rule["name"],
                     json.dumps(rule.get("points", [])),
@@ -261,7 +308,10 @@ class DatabaseManager:
                     rule.get("direction", "both"),
                     rule.get("coordinate_space", "camera"),
                     json.dumps(rule.get("camera_points") or []),
-                    json.dumps(rule.get("fms_points") or [])
+                    json.dumps(rule.get("fms_points") or []),
+                    slot_id,
+                    rule.get("comm_channel_id") or None,
+                    True if enable_dispatch is None else bool(enable_dispatch)
                 ))
                 conn.commit()
                 conn.close()
