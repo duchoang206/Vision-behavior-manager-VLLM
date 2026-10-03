@@ -57,6 +57,14 @@ from routers.active_learning import create_active_learning_router
 from core.comm_gateway import ChannelStore, gateway_manager
 from routers.comm_gateway import create_comm_gateway_router
 from deep_calib.adapter import status as deepcalib_status
+from core.inspection.ai_defect_inspector import create_ai_inspector_from_env
+from core.inspection.baseline_store import BaselineStore
+from core.inspection.config import InspectionConfig
+from core.inspection.live_detections import LiveDetections
+from core.inspection.pipeline import InspectionPipeline
+from core.inspection.recorded_frames import RecordedFrames
+from core.inspection.runtime import FrameSource, InspectionRuntime
+from routers.inspection import create_inspection_router
 
 metadata_fusion = MetadataFusion(ttl=1.0, template_ttl=3.5)
 
@@ -136,6 +144,27 @@ async def _activate_camera_runtime(cam_id: str, rtsp_url: str, start_inference: 
 
 # In-memory registry of active cameras
 cameras: Dict[str, dict] = {}
+
+
+def _inspection_stream_urls(cam_id: str) -> List[str]:
+    """MediaMTX relay first, the camera's own stream as fallback."""
+    direct = (cameras.get(cam_id) or {}).get("rtsp_url")
+    return [camera_relay_url(cam_id)] + ([direct] if direct else [])
+
+
+def _inspection_live_detections(cam_id: str) -> LiveDetections:
+    """The camera model's latest detections: the inspection stations' AI layer (like the occupancy rule)."""
+    reported_at = latest_metadata_at_by_cam.get(cam_id)
+    return LiveDetections(list(latest_objects_by_cam.get(cam_id, [])),
+                          None if reported_at is None else time.time() - reported_at)
+
+
+inspection_runtime = InspectionRuntime(
+    BaselineStore(), InspectionPipeline(create_ai_inspector_from_env()), FrameSource(_inspection_stream_urls),
+    publisher=fms_bridge.publish_inspection, event_sink=lambda event: broadcast_event_sync(event),
+    detections=_inspection_live_detections)
+app.include_router(create_inspection_router(inspection_runtime, lambda cam_id: cam_id in cameras,
+                                            RecordedFrames(lambda: ffmpeg_recorder.root)))
 
 def workflow_resources():
     from src.controller.registry import target_registry
@@ -506,6 +535,7 @@ class RuleItem(BaseModel):
     fms_slot_id: Optional[str | int] = None
     comm_channel_id: Optional[str] = None
     enable_fms_dispatch: Optional[bool] = True
+    inspection_config: Optional[Dict[str, Any]] = None  # type 'inspection' only
 
 class SaveRulesRequest(BaseModel):
     rules: List[RuleItem]
@@ -850,6 +880,13 @@ async def startup_event():
     except Exception:
         logging.exception("Communication gateway startup failed; video analytics continue")
 
+    # Inspection stations: wired before rules are restored so they resume after a restart.
+    try:
+        behavior_engine.inspection_listener = inspection_runtime.sync_rules
+        inspection_runtime.start()
+    except Exception:
+        logging.exception("Inspection runtime startup failed; video analytics continue")
+
     # Start 3D Digital Twin Real-Time Broadcaster (15 Hz)
     try:
         from src.server.digital_twin_bridge import digital_twin_bridge
@@ -965,6 +1002,10 @@ async def shutdown_event():
         await gateway_manager.stop()
     except Exception:
         logging.exception("Error stopping communication gateway")
+    try:
+        await asyncio.to_thread(inspection_runtime.stop)
+    except Exception:
+        logging.exception("Error stopping inspection runtime")
     system_log_store.emit("info", "gateway", "shutdown", "R-SkyView backend stopping")
     await asyncio.to_thread(system_log_store.stop)
 
@@ -1344,13 +1385,29 @@ async def get_map_overview():
             calibrations.append({"cam_id": cam_id, "name": cam["name"], "calibration": config})
     return {"status": "success", "calibrations": calibrations}
 
+def _validated_inspection_configs(rules: List["RuleItem"]) -> Dict[str, dict]:
+    """Normalised InspectionConfig per 'inspection' rule; 422 before anything is written."""
+    configs = {}
+    for rule in rules:
+        if (rule.type or "").lower() != "inspection":
+            continue
+        points = rule.camera_points or rule.points or []
+        if len(points) != 4:
+            raise HTTPException(status_code=422, detail=f"Quy tắc kiểm định '{rule.name}' cần đúng 4 đỉnh ROI")
+        try:
+            configs[rule.id] = InspectionConfig.model_validate(rule.inspection_config or {}).model_dump()
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Cấu hình kiểm định '{rule.name}' không hợp lệ: {exc}")
+    return configs
+
 # --- BEHAVIOR RULES (ROI & TRIPWIRES) API ---
 @app.post("/api/camera/{cam_id}/rules")
 @app.post("/api/camera/{cam_id}/roi")
 async def save_camera_rules(cam_id: str, req: SaveRulesRequest):
     if cam_id not in cameras:
         raise HTTPException(status_code=404, detail="Camera not found")
-        
+    inspection_configs = _validated_inspection_configs(req.rules)
+
     rules_dict_list = []
     db_manager.delete_rules_by_camera(cam_id)
     for r in req.rules:
@@ -1370,6 +1427,8 @@ async def save_camera_rules(cam_id: str, req: SaveRulesRequest):
             "comm_channel_id": r.comm_channel_id or None,
             "enable_fms_dispatch": r.enable_fms_dispatch is not False,
         }
+        if r.id in inspection_configs:
+            r_dict["inspection_config"] = inspection_configs[r.id]
         db_manager.save_rule(r_dict)
         rules_dict_list.append(r_dict)
         

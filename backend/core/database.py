@@ -101,6 +101,8 @@ class DatabaseManager:
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS fms_slot_id VARCHAR(64)")
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS comm_channel_id VARCHAR(64)")
             cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS enable_fms_dispatch BOOLEAN DEFAULT TRUE")
+            # Building view inspection stations (rule_type 'inspection')
+            cursor.execute("ALTER TABLE rules ADD COLUMN IF NOT EXISTS inspection_config JSONB")
             self._create_comm_schema(cursor)
             
             # 4. Tripwire Aggregate Counts Table
@@ -283,10 +285,11 @@ class DatabaseManager:
                 slot_id = rule.get("fms_slot_id")
                 slot_id = str(slot_id).strip() if slot_id not in (None, "") else None
                 enable_dispatch = rule.get("enable_fms_dispatch")
+                inspection_config = rule.get("inspection_config")
                 cursor.execute('''
                     INSERT INTO rules (id, cam_id, rule_type, name, points, target_objects, threshold, direction, coordinate_space, camera_points, fms_points,
-                                       fms_slot_id, comm_channel_id, enable_fms_dispatch)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                       fms_slot_id, comm_channel_id, enable_fms_dispatch, inspection_config)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         rule_type = EXCLUDED.rule_type,
                         name = EXCLUDED.name,
@@ -299,7 +302,8 @@ class DatabaseManager:
                         fms_points = EXCLUDED.fms_points,
                         fms_slot_id = EXCLUDED.fms_slot_id,
                         comm_channel_id = EXCLUDED.comm_channel_id,
-                        enable_fms_dispatch = EXCLUDED.enable_fms_dispatch
+                        enable_fms_dispatch = EXCLUDED.enable_fms_dispatch,
+                        inspection_config = EXCLUDED.inspection_config
                 ''', (
                     rule["id"], rule["cam_id"], r_type, rule["name"],
                     json.dumps(rule.get("points", [])),
@@ -311,7 +315,8 @@ class DatabaseManager:
                     json.dumps(rule.get("fms_points") or []),
                     slot_id,
                     rule.get("comm_channel_id") or None,
-                    True if enable_dispatch is None else bool(enable_dispatch)
+                    True if enable_dispatch is None else bool(enable_dispatch),
+                    json.dumps(inspection_config) if inspection_config is not None else None
                 ))
                 conn.commit()
                 conn.close()
