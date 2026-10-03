@@ -16,6 +16,8 @@ const MonitorLabelDialog = dynamic(() => import('./MonitorLabelDialog'), { ssr: 
 const ActiveLearningDialog = dynamic(() => import('./ActiveLearningDialog'), { ssr: false });
 import MonitorChatAssistant from './MonitorChatAssistant';
 import MonitorAlertsPanel from './MonitorAlertsPanel';
+import InspectionMonitorHud from './InspectionMonitorHud';
+import InspectionTileOverlay from './InspectionTileOverlay';
 
 type TrackedObject = {
   id: number;
@@ -656,6 +658,8 @@ const CameraStreamCard = React.memo(function CameraStreamCard({
           }}
         />
 
+        <InspectionTileOverlay camId={cam.id} active={isActive && isVisible} />
+
         {/* Storage slot states as reported to FMS: "ROI [Slot 5] · CAR FULL" */}
         {storageRois.length > 0 && (
           <div style={{
@@ -1120,6 +1124,7 @@ export default function MonitorView({ isActive = true }: { isActive?: boolean } 
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.bg, transition: 'background-color 0.2s ease' }}>
       {isActive && labelCameraId && <MonitorLabelDialog cameraId={labelCameraId} onClose={() => setLabelCameraId(null)} />}
       {isActive && learningCameraId && <ActiveLearningDialog cameraId={learningCameraId} onClose={() => setLearningCameraId(null)} />}
+      <InspectionMonitorHud active={isActive} />
 
       {/* Top Monitor Navigation */}
       <div style={{

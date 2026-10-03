@@ -9,6 +9,12 @@ import ModelManager from './ModelManager';
 import { commApi, isFmsFormat, isFmsSlotId, type CommChannel } from '../../lib/comm-gateway';
 import ModelLabelManager from './ModelLabelManager';
 import CameraSources from './CameraSources';
+import InspectionInspector, { InspectionResultPanel } from './InspectionInspector';
+import InspectionOverlay, { InspectionVertexLabels } from './InspectionOverlay';
+import {
+  DEFAULT_INSPECTION_CONFIG, INSPECTION_POINT_COUNT, newInspectionRuleId, normalizeInspectionConfig,
+  type InspectionConfig, type InspectionReport,
+} from '../../lib/roi-rules';
 import {
   Eye, EyeOff, ShieldAlert, Plus, Trash2,
   Camera as CameraIcon, RefreshCw, MapPin, Pencil,
@@ -23,6 +29,7 @@ type Rule = {
   points: number[][]; target_objects?: string[]; threshold?: number; direction?: string;
   camera_points?: number[][]; fms_points?: number[][]; coordinate_space?: string;
   fms_slot_id?: string | null; comm_channel_id?: string | null; enable_fms_dispatch?: boolean | null;
+  inspection_config?: InspectionConfig | null;
 };
 
 type DrawSpace = 'camera' | 'fms';
@@ -154,6 +161,9 @@ export default function BuildingView() {
   const [currentFmsDispatch, setCurrentFmsDispatch] = useState(true);
   const [commChannels, setCommChannels] = useState<CommChannel[]>([]);
   const [fmsLayout, setFmsLayout] = useState<FmsLayout | null>(null);
+  const [inspectionConfig, setInspectionConfig] = useState<InspectionConfig>(DEFAULT_INSPECTION_CONFIG);
+  const [inspectionDraftId, setInspectionDraftId] = useState<string>(() => newInspectionRuleId());
+  const [inspectionResult, setInspectionResult] = useState<{ report: InspectionReport; latency?: number } | null>(null);
   const { activeTab: workspaceTab } = useTab();
 
   // ─── Shared element styles derived from dynamic theme ───────────────────────
@@ -294,19 +304,27 @@ export default function BuildingView() {
     setCurrentSlotId('');
     setCurrentChannelId('');
     setCurrentFmsDispatch(true);
+    setInspectionConfig(DEFAULT_INSPECTION_CONFIG);
+    setInspectionDraftId(newInspectionRuleId());
+    setInspectionResult(null);
   };
 
   const handleSaveCurrentRule = async () => {
     const min = currentRuleType === 'tripwire' ? 2 : 3;
     const isStorageSlot = currentRuleType === 'occupancy';
+    const isInspection = currentRuleType === 'inspection';
     if (!selectedCamId) { alert('Chọn camera trước khi lưu quy tắc.'); return; }
     if (isStorageSlot && (currentPoints.length < 3 || currentFmsPoints.length < 3)) {
       alert('Ô chứa hàng cần vẽ đủ polygon trên cả Camera và FMS Map.');
       return;
     }
+    if (isInspection && currentPoints.length !== INSPECTION_POINT_COUNT) {
+      alert(`Ô kiểm định cần đúng ${INSPECTION_POINT_COUNT} đỉnh của ô sàn 1×1 m.`);
+      return;
+    }
     if (!isStorageSlot && currentPoints.length < min) { alert(`Cần ít nhất ${min} điểm!`); return; }
     const rules = rulesByCam[selectedCamId] || [];
-    const ruleId = editingRuleId || `rule_${Date.now().toString().slice(-4)}`;
+    const ruleId = editingRuleId || (isInspection ? inspectionDraftId : `rule_${Date.now().toString().slice(-4)}`);
     const nr: Rule = {
       id: ruleId, type: currentRuleType,
       name: currentRuleName || `${currentRuleType.toUpperCase()} #${rules.length + 1}`,
@@ -320,6 +338,12 @@ export default function BuildingView() {
         fms_slot_id: currentSlotId.trim() || null,
         comm_channel_id: currentChannelId || null,
         enable_fms_dispatch: currentFmsDispatch,
+      } : {}),
+      ...(isInspection ? {
+        fms_slot_id: currentSlotId.trim() || null,
+        comm_channel_id: currentChannelId || null,
+        enable_fms_dispatch: currentFmsDispatch,
+        inspection_config: inspectionConfig,
       } : {}),
     };
     const updated = editingRuleId
@@ -344,6 +368,11 @@ export default function BuildingView() {
     setCurrentSlotId(rule.fms_slot_id ? String(rule.fms_slot_id) : '');
     setCurrentChannelId(rule.comm_channel_id || '');
     setCurrentFmsDispatch(rule.enable_fms_dispatch !== false);
+    if (rType === 'inspection') {
+      setInspectionConfig(normalizeInspectionConfig(rule.inspection_config));
+      setInspectionDraftId(rule.id);
+    }
+    setInspectionResult(null);
   };
 
   const handleDeleteRule = async (ruleId: string) => {
@@ -398,10 +427,12 @@ export default function BuildingView() {
     boxShadow: isDark ? `0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px ${C.accentBorder}` : '0 20px 60px rgba(0,0,0,0.15)',
   };
   const isStorageRule = currentRuleType === 'occupancy';
+  const isInspectionRule = currentRuleType === 'inspection';
   const activeDrawPoints = ruleDrawSpace === 'fms' ? currentFmsPoints : currentPoints;
   const ruleMinPoints = currentRuleType === 'tripwire' ? 2 : 3;
   const saveRuleDisabled = isStorageRule
     ? currentPoints.length < 3 || currentFmsPoints.length < 3
+    : isInspectionRule ? currentPoints.length !== INSPECTION_POINT_COUNT
     : currentPoints.length < ruleMinPoints;
   const slamMapRect = getSlamMapRect(fmsLayout);
   const slamMapWidth = Math.max(0.001, slamMapRect[2] - slamMapRect[0]);
@@ -464,6 +495,11 @@ export default function BuildingView() {
 	                    setCurrentFmsPoints([]);
 	                    setRuleDrawSpace('camera');
 	                    setIsDrawing(false);
+	                    if (nextType === 'inspection' && !editingRuleId) {
+	                      setInspectionDraftId(newInspectionRuleId());
+	                      setInspectionConfig(DEFAULT_INSPECTION_CONFIG);
+	                    }
+	                    setInspectionResult(null);
 	                  }}
 	                  style={selectStyle} {...focusHandlers}>
                   <option value="occupancy">Ô chứa hàng / Vị trí lưu kho (Storage Slot ROI)</option>
@@ -471,6 +507,7 @@ export default function BuildingView() {
                   <option value="tripwire">Vạch ảo 2 chiều (Tripwire Line)</option>
                   <option value="dwell_time">Lảng vãng / Dừng chờ (Dwell Time)</option>
                   <option value="density">Mật độ đám đông (Crowd Density)</option>
+                  <option value="inspection">📐 Kiểm định Ô Hàng (Inspection)</option>
 	                </select>
 	              </div>
 
@@ -537,7 +574,24 @@ export default function BuildingView() {
                 );
               })()}
 
-              <div>
+              {isInspectionRule && (
+                <InspectionInspector
+                  camId={selectedCamId} ruleId={editingRuleId || inspectionDraftId} points={currentPoints}
+                  config={inspectionConfig} onConfigChange={setInspectionConfig}
+                  slotId={currentSlotId} onSlotIdChange={setCurrentSlotId}
+                  channelId={currentChannelId} onChannelIdChange={setCurrentChannelId} channels={commChannels}
+                  fmsDispatch={currentFmsDispatch} onFmsDispatchChange={setCurrentFmsDispatch}
+                  availableClasses={availableClasses} targetClasses={currentTargetClasses} onTargetClassesChange={setCurrentTargetClasses}
+                  onResult={(report, latency) => {
+                    setInspectionResult(report ? { report, latency } : null);
+                    if (report) setSnapshotTimestamp(Date.now());
+                  }}
+                  onSave={handleSaveCurrentRule} saveDisabled={saveRuleDisabled}
+                  colors={C} styles={{ input: inputStyle, select: selectStyle, label: labelStyle }}
+                />
+              )}
+
+              {!isInspectionRule && <div>
                 <label style={labelStyle}>Đối Tượng Áp Dụng</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {availableClasses.map(c => {
@@ -557,7 +611,7 @@ export default function BuildingView() {
                     );
                   })}
                 </div>
-              </div>
+              </div>}
 
               {(currentRuleType === 'dwell_time' || currentRuleType === 'density') && (
                 <div>
@@ -646,6 +700,14 @@ export default function BuildingView() {
 	                            <div style={{ color: C.textMuted, textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', marginBottom: '4px' }}>
 	                              {rType}{rType === 'occupancy' ? ` · CAM ${cameraCount} · FMS ${fmsCount}` : ''}
 	                            </div>
+                            {rType === 'inspection' && (
+                              <div style={{ marginBottom: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                <span style={{ background: C.accentDim, color: C.accentL, border: `1px solid ${C.accentBorder}`, padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700 }}>
+                                  📐 {r.inspection_config?.mode || 'HYBRID'} · ô {r.inspection_config?.roi_width_mm ?? 1000}×{r.inspection_config?.roi_height_mm ?? 1000}
+                                </span>
+                                <span style={{ color: C.textMuted, fontSize: '10px' }}>{r.fms_slot_id ? `Slot ${r.fms_slot_id}` : 'Chưa gán Slot'}</span>
+                              </div>
+                            )}
                             {rType === 'occupancy' && (
                               <div style={{ marginBottom: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                 <span style={{
@@ -725,7 +787,7 @@ export default function BuildingView() {
 	                      onClick={e => {
 	                        if (!isDrawing || ruleDrawSpace !== 'camera') return;
 	                        const r = e.currentTarget.getBoundingClientRect();
-	                        setCurrentPoints(prev => [...prev, [
+	                        setCurrentPoints(prev => (isInspectionRule && prev.length >= INSPECTION_POINT_COUNT) ? prev : [...prev, [
 	                          Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
 	                          Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
 	                        ]]);
@@ -743,8 +805,8 @@ export default function BuildingView() {
 	                        );
 	                        if (pts.length >= 3) return (
 	                          <g key={r.id}>
-	                            <polygon points={pointsAttr(pts)} fill={rType === 'occupancy' ? 'rgba(34,211,238,0.14)' : 'rgba(244,63,94,0.18)'} stroke={rType === 'occupancy' ? '#22d3ee' : '#f43f5e'} strokeWidth="0.004" />
-	                            <text x={pts[0][0]} y={pts[0][1] - 0.022} fill={rType === 'occupancy' ? '#22d3ee' : '#fb7185'} fontSize="0.028" fontWeight="bold">{r.name}</text>
+	                            <polygon points={pointsAttr(pts)} fill={rType === 'occupancy' ? 'rgba(34,211,238,0.14)' : rType === 'inspection' ? 'rgba(245,158,11,0.12)' : 'rgba(244,63,94,0.18)'} stroke={rType === 'occupancy' ? '#22d3ee' : rType === 'inspection' ? '#f59e0b' : '#f43f5e'} strokeWidth="0.004" />
+	                            <text x={pts[0][0]} y={pts[0][1] - 0.022} fill={rType === 'occupancy' ? '#22d3ee' : rType === 'inspection' ? '#fbbf24' : '#fb7185'} fontSize="0.028" fontWeight="bold">{r.name}</text>
 	                          </g>
 	                        );
 	                        return null;
@@ -757,6 +819,11 @@ export default function BuildingView() {
 	                          <polyline points={pointsAttr(currentPoints)} fill="none" stroke="#818cf8" strokeWidth="0.004" strokeDasharray="0.013" />
 	                        </>
 	                      )}
+	                      {isInspectionRule && currentPoints.length === INSPECTION_POINT_COUNT && (
+	                        <polygon points={pointsAttr(currentPoints)} fill="rgba(245,158,11,0.08)" stroke="#f59e0b" strokeWidth="0.003" />
+	                      )}
+	                      {isInspectionRule && <InspectionVertexLabels points={currentPoints} />}
+	                      {isInspectionRule && inspectionResult && <InspectionOverlay report={inspectionResult.report} />}
 	                    </svg>
 	                  </div>
 	                </div>
@@ -806,6 +873,9 @@ export default function BuildingView() {
 	                  </div>
 	                </div>
 	              </div>
+	              {isInspectionRule && inspectionResult && (
+	                <InspectionResultPanel report={inspectionResult.report} clientLatencyMs={inspectionResult.latency} colors={C} />
+	              )}
 	            </div>
           </div>
         )}

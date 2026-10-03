@@ -897,6 +897,26 @@ class FMSBridge:
             self.layout_depth = float(config["layout_depth"])
         return self.get_status()
 
+    def publish_inspection(self, payload: dict, topic: Optional[str] = None) -> bool:
+        """Publish an inspection-station verdict to the FMS MQTT broker.
+
+        ``OK`` → ``{"state": "Car Full", "quality": "OK", ...}``, ``NG`` →
+        ``"Slot Blocked"``, ``UNCERTAIN`` / interlock → ``"Hold"`` (AGV waits).
+        The topic is ``FMS_INSPECTION_TOPIC`` (``{slot_id}`` is substituted).
+        Returns False when the broker is not connected; never raises.
+        """
+        client = self._mqtt_client
+        if client is None or not self.is_connected_mqtt:
+            return False
+        template = topic or os.getenv("FMS_INSPECTION_TOPIC", "rskyview/inspection/{slot_id}")
+        try:
+            info = client.publish(template.replace("{slot_id}", str(payload.get("slot_id", ""))),
+                                  json.dumps(payload, ensure_ascii=False), qos=1)
+            return info.rc == 0
+        except Exception as exc:
+            logger.warning(f"Inspection MQTT publish failed: {exc}")
+            return False
+
 
 # Global singleton instance
 fms_bridge = FMSBridge()

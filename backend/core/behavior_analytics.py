@@ -41,6 +41,9 @@ class BehaviorAnalyticsEngine:
         self.transition_listener = None  # (cam_id, rule, status, info) on confirmed slot state
         self.rules_listener = None       # (cam_id, parsed_rules) after set_rules
         self.alert_listener = None       # (event) for intrusion / dwell / density alerts
+        # Inspection stations (rule type 'inspection') are evaluated on camera
+        # frames by core.inspection.runtime, which owns their temporal FSM.
+        self.inspection_listener = None  # (cam_id, raw inspection rules) after set_rules
 
     def _notify(self, listener, *args):
         if listener is None:
@@ -302,6 +305,8 @@ class BehaviorAnalyticsEngine:
 
         self.rules[cam_id] = parsed_rules
         self._notify(self.rules_listener, cam_id, parsed_rules)
+        self._notify(self.inspection_listener, cam_id,
+                     [r for r in rules_list if str(r.get("type") or r.get("rule_type") or "").lower() == "inspection"])
 
     def process_frame(self, cam_id: str, objects: List[dict]) -> Tuple[List[dict], Dict[str, dict], List[dict]]:
         """

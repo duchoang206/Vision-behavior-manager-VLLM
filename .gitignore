@@ -58,3 +58,6 @@ backend/data/active_learning/
 recordings/
 backend/runs/
 runs/
+
+# Inspection station empty-cell baselines (runtime data)
+backend/data/inspection_baselines/
